@@ -1,0 +1,18 @@
+{
+  "name": "whatsapp-study-bot",
+  "version": "1.0.0",
+  "description": "Bot de WhatsApp para grupos de estudio — recordatorios, tareas y moderación",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "whatsapp-web.js": "^1.23.0",
+    "node-cron": "^3.0.3",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  }
+}

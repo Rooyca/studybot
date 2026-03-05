@@ -1,0 +1,42 @@
+[
+  {
+    "type": "mute",
+    "target": "191010198052997@lid",
+    "minutes": 1,
+    "reason": "\"test\"",
+    "by": "573203069657",
+    "ts": "2026-03-05T03:12:43.568Z"
+  },
+  {
+    "type": "word_warning",
+    "user": "573203069657",
+    "name": "ron",
+    "word": "publicidad",
+    "snippet": "publicidad",
+    "ts": "2026-03-05T06:29:12.228Z"
+  },
+  {
+    "type": "mute",
+    "target": "35463712751727@lid",
+    "minutes": 1,
+    "reason": "\"falta de respeto\"",
+    "by": "573203069657",
+    "ts": "2026-03-05T06:32:21.792Z"
+  },
+  {
+    "type": "mute",
+    "target": "35463712751727@lid",
+    "minutes": 60,
+    "reason": "\" \"1 minuto\" \"porque si\"",
+    "by": "573112110769",
+    "ts": "2026-03-05T06:50:36.136Z"
+  },
+  {
+    "type": "mute",
+    "target": "35463712751727@lid",
+    "minutes": 2,
+    "reason": "\"Vaya duerma\"",
+    "by": "573203069657",
+    "ts": "2026-03-05T07:31:07.513Z"
+  }
+]

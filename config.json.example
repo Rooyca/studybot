@@ -1,0 +1,61 @@
+{
+  "admins": [
+    "573111111111",
+    "573222222222"
+  ],
+
+  "groupId": "123456123456771668@g.us",
+
+  "prefix": "!",
+
+  "reminderDays": [4, 2, 0],
+
+  "weeklySummary": {
+    "enabled": true,
+    "dayOfWeek": 1,
+    "hour": 9,
+    "message": "📅 *Resumen semanal — Entregas de esta semana*\n\n{entries}\n\n¡Buena semana a todos! 💪"
+  },
+
+  "wordWarnings": {
+    "enabled": true,
+    "words": ["spam", "publicidad", "offtopic"],
+    "message": "⚠️ @{user} por favor mantengamos el grupo enfocado en los estudios."
+  },
+
+  "mute": {
+    "defaultMinutes": 60,
+    "maxMinutes": 1440,
+    "muteMessage": "🔇 @{user} ha sido silenciado por {minutes} minutos por: {reason}",
+    "unmuteMessage": "🔊 @{user} ya puede volver a escribir en el grupo.",
+    "deletedMessage": "🔇 Tu mensaje fue eliminado porque estás silenciado hasta las {until}. Contacta a un admin si crees que es un error."
+  },
+
+  "anonymous": {
+    "enabled": true,
+    "publishPrefix": "🙋 *Pregunta anónima:*\n\n",
+    "confirmMessage": "✅ Tu pregunta fue enviada al grupo de forma anónima. ¡Alguien del grupo te responderá pronto!",
+    "replyInstruction": "\n\n_Responde a esta pregunta en el grupo usando_ `!responder [tu respuesta]` _para que quede registrado._"
+  },
+
+  "messages": {
+    "reminder4days": "📅 *RECORDATORIO — 4 días restantes*\n\n📌 {title}\n🗓️ Fecha límite: {date}\n📝 {description}\n\n¡Organízate con tiempo! 💪",
+    "reminder2days": "⏰ *RECORDATORIO — Solo 2 días restantes*\n\n📌 {title}\n🗓️ Fecha límite: {date}\n📝 {description}\n\n¡Ya casi! No lo dejes para el último momento. 🚀",
+    "reminderToday": "🚨 *HOY ES EL DÍA — Fecha de entrega*\n\n📌 {title}\n🗓️ Entrega: HOY ({date})\n📝 {description}\n\n¡Último aviso! Asegúrate de entregar a tiempo. ✅"
+  },
+
+  "welcome": {
+    "enabled": true,
+    "message": "👋 ¡Bienvenido/a al grupo, @{name}! 🎉\n\nAquí tienes todo lo que necesitas saber:\n\n📜 *Reglas del grupo:*\n 1. Respeto ante todo — trato amable entre compañeros.\n 2. Solo contenido relacionado con los estudios.\n 3. No publicidad, spam ni links externos NO solicitados.\n 4. Comparte recursos útiles: tareas, apuntes, recordatorios.\n 5. Ante dudas, consulta a los admins.\n\n🤖 *Comandos útiles:*\n• `!tareas` — Ver tareas resueltas\n• `!recordatorios` — Ver fechas de entrega próximas\n• `!pregunta [texto]` — Hacer una pregunta anónima _(desde el privado del bot)_\n• `!ayuda` — Ver todos los comandos disponibles\n\n¡Mucho éxito en tus estudios! 💪📚"
+  },
+
+  "faq": [],
+
+  "activityCheck": {
+    "enabled": true,
+    "warnAfterDays": 30,
+    "removeAfterDays": 7,
+    "warningMessage": "⚠️ Hola {name}, llevas más de {days} días sin enviar mensajes en el grupo de estudio. Si no participas en los próximos 7 días serás removido automáticamente. ¡Te esperamos! 😊",
+    "removalMessage": "👋 Hola {name}, has sido removido del grupo de estudio por inactividad. ¡Puedes pedir que te vuelvan a agregar cuando quieras!"
+  }
+}
