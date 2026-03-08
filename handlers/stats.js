@@ -62,6 +62,7 @@ function buildUserStats(number) {
     `⭐ Puntos totales: ${user.totalPoints}\n\n` +
     `📚 Tareas propuestas: ${user.tasksProposed}\n` +
     `✅ Tareas aprobadas: ${user.tasksApproved}\n` +
+    `📖 Apuntes aprobados: ${user.notesApproved}\n` +
     `💬 Preguntas respondidas: ${user.questionsAnswered}\n` 
   );
 }

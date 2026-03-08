@@ -271,10 +271,12 @@ client.on('message', async msg => {
     if (!body.startsWith(pfx)) return;
 
     // ── Parse comando ────────────────────────────────────────────────────────
-    const spaceIdx = body.indexOf(' ');
-    const rawCmd = spaceIdx === -1 ? body.slice(pfx.length) : body.slice(pfx.length, spaceIdx);
+    // Normalize: treat "! tareas" the same as "!tareas"
+    const normalized = pfx + body.slice(pfx.length).trimStart();
+    const spaceIdx = normalized.indexOf(' ');
+    const rawCmd = spaceIdx === -1 ? normalized.slice(pfx.length) : normalized.slice(pfx.length, spaceIdx);
     const cmd  = rawCmd.toLowerCase();
-    const args = spaceIdx === -1 ? '' : body.slice(spaceIdx + 1).trim();
+    const args = spaceIdx === -1 ? '' : normalized.slice(spaceIdx + 1).trim();
 
     // También moderamos comandos de usuarios muteados en grupos
     if (isGroup) {
@@ -375,6 +377,7 @@ client.on('message', async msg => {
       const parsed = parseReminderCommand(args);
       if (parsed.error) { await reply(msg, `❌ ${parsed.error}`); return; }
       const saved = storage.saveReminder({ ...parsed, addedBy: number });
+      storage.saveFaqForReminder(saved);
       const diff = daysDiff(saved.date);
       await reply(msg,
         `✅ *Recordatorio guardado*\n\n📌 ${saved.title}\n🗓️ ${formatDate(saved.date)} (${diff === 0 ? 'HOY' : `${diff} días`})\n📝 ${saved.description || '—'}\n🆔 \`${saved.id}\``
@@ -389,7 +392,9 @@ client.on('message', async msg => {
       if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
       if (!args) { await reply(msg, '❌ Uso: `!borrar-recordatorio [id]`'); return; }
       const before = storage.getReminders().length;
-      storage.deleteReminder(args.trim());
+      const remId = args.trim();
+      storage.deleteReminder(remId);
+      storage.deleteFaqsByReminderId(remId);
       await reply(msg, before > storage.getReminders().length
         ? `🗑️ Recordatorio eliminado.`
         : `❌ No encontré el ID \`${args.trim()}\``
@@ -413,7 +418,7 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     // !ver-tarea [n]
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'ver-tarea') {
+    if (cmd === 'ver-tarea' || cmd === 'v-t' || cmd === ' ver-tarea') {
       if (!args) { await reply(msg, '🔍 Uso: `!ver-tarea [número]`\n\nEjemplo: `!ver-tarea 3`\n\nUsa `!tareas` para ver la lista con números.'); return; }
       const list = storage.getHomework();
       const n = parseInt(args.trim(), 10);
@@ -431,7 +436,7 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     // !buscar-tarea [consulta]
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'buscar-tarea') {
+    if (cmd === 'buscar-tarea' || cmd === 'b-t') {
       if (!args) { await reply(msg, '🔍 Uso: `!buscar-tarea [consulta]`\n\nEjemplo: `!buscar-tarea algoritmos`\n\nBusca por materia, título o descripción.'); return; }
       const allHomework = storage.getHomework();
       const query = args.trim().toLowerCase();
@@ -596,6 +601,7 @@ client.on('message', async msg => {
           approvedBy: number,
         });
         storage.deletePendingReminder(pendingReminder.id);
+        storage.saveFaqForReminder(saved);
         storage.incrementStat(pendingReminder.suggestedBy, pendingReminder.suggestedByName, 'remindersApproved');
 
         const diff = daysDiff(saved.date);
@@ -699,7 +705,7 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     // !ver-apuntes [n]
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'ver-apuntes') {
+    if (cmd === 'ver-apuntes' || cmd === 'v-a') {
       if (!args) { await reply(msg, '🔍 Uso: `!ver-apuntes [número]`\n\nEjemplo: `!ver-apuntes 2`\n\nUsa `!apuntes` para ver la lista con números.'); return; }
       const list = storage.getNotes();
       const n = parseInt(args.trim(), 10);
@@ -717,7 +723,7 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     // !buscar-apuntes [consulta]
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'buscar-apuntes') {
+    if (cmd === 'buscar-apuntes' || cmd === 'b-a') {
       if (!args) { await reply(msg, '🔍 Uso: `!buscar-apuntes [consulta]`\n\nEjemplo: `!buscar-apuntes cálculo`\n\nBusca por materia, título o descripción.'); return; }
       const allNotes = storage.getNotes();
       const query = args.trim().toLowerCase();
@@ -822,9 +828,12 @@ client.on('message', async msg => {
     // !faq
     // ══════════════════════════════════════════════════════════════════════════
     if (cmd === 'faq') {
-      const faqs = storage.getFaqs();
-      if (!faqs.length) { await reply(msg, '❓ No hay FAQs configuradas todavía.\n\n_Los admins pueden agregar con \`!add-faq\`_'); return; }
-      const lines = faqs.map((f, i) => `*${i+1}. ${f.question}*\n   ${f.answer}`);
+      const faqs = storage.getActiveFaqs();
+      if (!faqs.length) { await reply(msg, '❓ No hay FAQs activas todavía.\n\n_Se generan automáticamente con los recordatorios, o los admins pueden agregar con \`!add-faq\`_'); return; }
+      const lines = faqs.map((f, i) => {
+        const label = f.reminderId ? '📌' : '❓';
+        return `*${i+1}. ${label} ${f.question}*\n   ${f.answer}`;
+      });
       await reply(msg, `❓ *Preguntas Frecuentes:*\n\n${lines.join('\n\n')}`);
       return;
     }
@@ -866,7 +875,7 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     // !tabla — Leaderboard
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'tabla') {
+    if (cmd === 'tabla' || cmd === ' tabla') {
       await reply(msg, buildLeaderboard());
       return;
     }

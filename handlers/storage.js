@@ -134,8 +134,36 @@ function savePendingNote(data) {
 
 // ─── FAQs ─────────────────────────────────────────────────────────────────────
 
+const STOP_WORDS = new Set([
+  'el','la','los','las','un','una','unos','unas','de','del','en','a','al',
+  'por','para','con','sin','sobre','y','o','que','se','es','son','hay',
+  'no','si','su','sus','este','esta','estos','estas','ese','esa','esos','esas',
+  'mi','tu','le','les','me','te','lo','fue','ser','estar','tiene','tengo',
+  'han','has','he','ver','ir','da','dar','hace','hacer','del','las','los',
+]);
+
+function extractKeywords(title, description) {
+  const text = `${title || ''} ${description || ''}`.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ');
+  const words = text.split(/\s+/).filter(w => w.length >= 3 && !STOP_WORDS.has(w));
+  return [...new Set(words)].slice(0, 8);
+}
+
 const getFaqs    = ()    => read('faqs');
 const deleteFaq  = (id)  => write('faqs', getFaqs().filter(f => f.id !== id));
+
+/** Returns only FAQs that are currently relevant:
+ *  - Admin-added FAQs (no reminderId) are always included.
+ *  - Reminder-generated FAQs are included only while expiresAt >= today. */
+function getActiveFaqs() {
+  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+  return getFaqs().filter(f => {
+    if (f.reminderId) return f.expiresAt >= todayStr;
+    return true;
+  });
+}
+
 function saveFaq(data) {
   const list = getFaqs();
   const entry = { id: genId(), ...data, createdAt: new Date().toISOString() };
@@ -143,9 +171,47 @@ function saveFaq(data) {
   write('faqs', list);
   return entry;
 }
+
+/** Auto-generates and saves a FAQ entry linked to a reminder. */
+function saveFaqForReminder(reminder) {
+  let keywords = extractKeywords(reminder.title, reminder.description);
+  if (keywords.length < 2) {
+    const fallback = reminder.title.toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/).filter(w => w.length >= 2);
+    keywords = [...new Set([...keywords, ...fallback])];
+  }
+  keywords = keywords.slice(0, 8);
+
+  const [y, m, d] = reminder.date.split('-');
+  const formattedDate = `${d}/${m}/${y}`;
+  const question = `¿Cuándo es la entrega de "${reminder.title}"?`;
+  const answer = `La fecha límite es el *${formattedDate}*.${reminder.description ? `\n\n📝 ${reminder.description}` : ''}`;
+
+  const list = getFaqs();
+  const entry = {
+    id: genId(),
+    keywords,
+    question,
+    answer,
+    reminderId: reminder.id,
+    expiresAt: reminder.date,
+    addedBy: 'system',
+    createdAt: new Date().toISOString(),
+  };
+  list.push(entry);
+  write('faqs', list);
+  return entry;
+}
+
+/** Removes all FAQ entries associated with a reminder. */
+const deleteFaqsByReminderId = (reminderId) =>
+  write('faqs', getFaqs().filter(f => f.reminderId !== reminderId));
+
 function matchFaq(text) {
   const lower = text.toLowerCase();
-  return getFaqs().find(f =>
+  return getActiveFaqs().find(f =>
     (f.keywords || []).some(k => lower.includes(k.toLowerCase()))
   );
 }
@@ -333,7 +399,7 @@ module.exports = {
   // pending notes
   getPendingNotes, savePendingNote, deletePendingNote,
   // faq
-  getFaqs, saveFaq, deleteFaq, matchFaq,
+  getFaqs, getActiveFaqs, saveFaq, saveFaqForReminder, deleteFaq, deleteFaqsByReminderId, matchFaq,
   // stats
   getStats, incrementStat, getLeaderboard,
   // mute
