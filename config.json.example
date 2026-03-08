@@ -49,6 +49,21 @@
     "message": "👋 ¡Bienvenido/a al grupo, @{name}! 🎉\n\nAquí tienes todo lo que necesitas saber:\n\n📜 *Reglas del grupo:*\n 1. Respeto ante todo — trato amable entre compañeros.\n 2. Solo contenido relacionado con los estudios.\n 3. No publicidad, spam ni links externos NO solicitados.\n 4. Comparte recursos útiles: tareas, apuntes, recordatorios.\n 5. Ante dudas, consulta a los admins.\n\n🤖 *Comandos útiles:*\n• `!tareas` — Ver tareas resueltas\n• `!recordatorios` — Ver fechas de entrega próximas\n• `!pregunta [texto]` — Hacer una pregunta anónima _(desde el privado del bot)_\n• `!ayuda` — Ver todos los comandos disponibles\n\n¡Mucho éxito en tus estudios! 💪📚"
   },
 
+  "subjects": [
+    {
+      "name": "Algoritmos I",
+      "aliases": ["algoritmos 1", "algo 1", "algoritmos i"],
+      "driveFolder": "https://drive.google.com/drive/folders/EXAMPLE_ID_1",
+      "notesFolder": "https://drive.google.com/drive/folders/EXAMPLE_NOTES_ID_1"
+    },
+    {
+      "name": "Cálculo I",
+      "aliases": ["calculo 1", "calculo i", "cálculo 1"],
+      "driveFolder": "https://drive.google.com/drive/folders/EXAMPLE_ID_2",
+      "notesFolder": "https://drive.google.com/drive/folders/EXAMPLE_NOTES_ID_2"
+    }
+  ],
+
   "faq": [],
 
   "activityCheck": {

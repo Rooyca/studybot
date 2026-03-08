@@ -1,11 +1,4 @@
-// handlers/questions.js — sistema de preguntas anónimas
-//
-// FLUJO:
-//  1. Usuario le escribe al bot en privado: !pregunta [texto]
-//  2. Bot publica la pregunta en el grupo y guarda el ID del mensaje publicado
-//  3. Para responder, alguien en el grupo debe CITAR ese mensaje y escribir !responder [texto]
-//  4. Bot verifica: ¿ya fue respondida? ¿la respuesta tiene más de 5 caracteres?
-//  5. Solo la primera respuesta válida suma puntos (+3). Las demás quedan guardadas sin puntos.
+// sistema de preguntas anónimas
 
 const { saveQuestion, getQuestions, updateQuestion, incrementStat } = require('./storage');
 
@@ -23,7 +16,7 @@ async function publishQuestion(client, config, askerNumber, askerName, questionT
 
   const groupText =
     `🙋 *Pregunta anónima:*\n\n${questionText}\n\n` +
-    `_Responde citando este mensaje con_ \`!responder [tu respuesta]\` _para ganar puntos._`;
+    `_Responde citando este mensaje para ganar puntos._`;
 
   // Guardar el ID del mensaje publicado para poder vincularlo cuando alguien responda
   const sentMsg = await client.sendMessage(config.groupId, groupText);
@@ -37,7 +30,7 @@ async function publishQuestion(client, config, askerNumber, askerName, questionT
  * El usuario debe haber citado (reply) el mensaje del bot en el grupo.
  *
  * Retorna un objeto con el resultado:
- *   { status: 'no_quote' | 'not_a_question' | 'already_answered' | 'incoherent' | 'accepted' | 'api_error', ... }
+ *   { status: 'no_quote' | 'not_a_question' | 'already_answered' | 'incoherent' | 'accepted'... }
  */
 async function processAnswer(msg, responderNumber, responderName, answerText) {
   if (!msg.hasQuotedMsg) return { status: 'no_quote' };
@@ -48,14 +41,12 @@ async function processAnswer(msg, responderNumber, responderName, answerText) {
 
   const alreadyAnswered = !!question.acceptedAnswer;
 
-  // Validación de longitud (sin IA)
   const coherenceResult = checkCoherence(answerText);
 
   if (!coherenceResult.isCoherent) {
     return { status: 'incoherent', reason: coherenceResult.reason, question: question.question };
   }
 
-  // 5. Respuesta coherente — ¿es la primera aceptada?
   if (alreadyAnswered) {
     // Guardar como respuesta adicional (sin puntos)
     const extras = question.extraAnswers || [];
@@ -69,7 +60,6 @@ async function processAnswer(msg, responderNumber, responderName, answerText) {
     };
   }
 
-  // 6. Primera respuesta válida — guardar y dar puntos
   const acceptedAnswer = {
     by: responderNumber,
     byName: responderName,
@@ -116,7 +106,7 @@ function buildQuestionsList(limit = 10) {
     const status = q.acceptedAnswer ? '✅ Respondida' : '⏳ Sin respuesta';
     const answer = q.acceptedAnswer
       ? `   💬 *R:* ${q.acceptedAnswer.text}\n   👤 Por: ${q.acceptedAnswer.byName || 'Anónimo'}`
-      : `   _Sé el primero en responder citando el mensaje con_ \`!responder\``;
+      : `   ⚬ _Se el primero en responder citando la pregunta._`;
     const extras = q.extraAnswers?.length
       ? `\n   📎 +${q.extraAnswers.length} respuesta(s) adicional(es)`
       : '';

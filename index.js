@@ -3,25 +3,31 @@
 // COMANDOS PÚBLICOS:
 //   !ayuda                      — Ver comandos
 //   !recordatorios              — Ver fechas próximas
-//   !tareas                     — Ver tareas aprobadas
-//   !buscar-tarea [q]           — Buscar tarea por materia/palabra
+//   !tareas                     — Ver tareas aprobadas (con ID numérico)
+//   !ver-tarea [n]              — Ver detalle de una tarea por su número
+//   !buscar-tarea [consulta]    — Buscar tareas por materia, título o descripción
 //   !proponer-tarea             — Proponer una tarea para revisión
-//   !proponer-recordatorio      — Proponer una tarea para revisión
+//   !proponer-recordatorio      — Proponer un recordatorio para revisión
+//   !apuntes                    — Ver apuntes aprobados (con ID numérico)
+//   !ver-apuntes [n]            — Ver detalle de un apunte por su número
+//   !buscar-apuntes [consulta]  — Buscar apuntes por materia, título o descripción
+//   !proponer-apuntes           — Proponer apuntes para revisión
 //   !pregunta [texto]           — Enviar pregunta anónima al grupo (desde privado)
 //   !faq                        — Ver preguntas frecuentes
 //   !tabla                      — Ver leaderboard
 //   !puntos                     — Ver tus propias estadísticas
 //   !premio                     — Ver el premio actual del leaderboard
-//   !responder [texto]          — Registrar respuesta a una pregunta anónima
+//   (responde citando el mensaje de la pregunta para ganar puntos)
 //   !admins                     — Ver administradores
 //
 // COMANDOS ADMIN:
 //   !recordatorio "T" YYYY-MM-DD [desc]  — Agregar recordatorio
 //   !borrar-r [id]                        — Borrar recordatorio
-//   !pendientes                           — Ver tareas esperando revisión
-//   !aprobar [id]                         — Aprobar tarea propuesta
-//   !rechazar [id] [motivo]               — Rechazar tarea propuesta
+//   !pendientes                           — Ver tareas y apuntes esperando revisión
+//   !aprobar [id]                         — Aprobar tarea o apuntes propuestos
+//   !rechazar [id] [motivo]               — Rechazar tarea o apuntes propuestos
 //   !borrar-tarea [id]                    — Borrar tarea aprobada
+//   !borrar-apuntes [id]                  — Borrar apuntes aprobados
 //   !add-faq [keyword1,keyword2] | [q] | [a]  — Agregar FAQ
 //   !del-faq [id]                         — Borrar FAQ
 //   !conf-premio premio | puntos | patrocinador  — Configurar premio del leaderboard
@@ -32,6 +38,7 @@
 //   !test-recordatorios                   — Forzar revisión recordatorios
 //   !test-actividad                       — Forzar revisión de inactividad
 //   !inactivos                            — Ver usuarios inactivos
+//   !todos [mensaje]                        — Enviar mensaje privado a todos los miembros del grupo
 // ══════════════════════════════════════════════════════════════════════════════
 
 const { Client, LocalAuth } = require('whatsapp-web.js');
@@ -47,6 +54,24 @@ const { publishQuestion, processAnswer, buildQuestionsList } = require('./handle
 const { checkInactivity } = require('./handlers/activity');
 
 // ─── Client setup ─────────────────────────────────────────────────────────────
+
+/**
+ * Matches a user-supplied subject string against the configured subjects list.
+ * Comparison is case-insensitive and ignores extra whitespace.
+ * Returns { name, driveFolder } of the matched subject, or null if not found.
+ */
+function resolveSubject(input) {
+  const subjects = config.subjects || [];
+  const norm = s => s.toLowerCase().trim().replace(/\s+/g, ' ');
+  const needle = norm(input);
+  for (const subj of subjects) {
+    const candidates = [subj.name, ...(subj.aliases || [])];
+    if (candidates.some(c => norm(c) === needle)) {
+      return { name: subj.name, driveFolder: subj.driveFolder || null, notesFolder: subj.notesFolder || null };
+    }
+  }
+  return null;
+}
 
 const client = new Client({
   authStrategy: new LocalAuth(),
@@ -82,6 +107,7 @@ client.on('group_join', async notification => {
         const contact = await client.getContactById(participantId);
         const name = contact.pushname || contact.number;
         const text = config.welcome.message.replace('{name}', name);
+        await new Promise(res => setTimeout(res, 5000)); // esperar 5 segundos para que el usuario pueda ver el mensaje de bienvenida
         await chat.sendMessage(text, { mentions: [contact] });
         console.log(`[WELCOME] Nuevo miembro: ${name} (${contact.number})`);
       } catch (err) {
@@ -126,12 +152,19 @@ const HELP_PUBLIC = `
 
 📂 *Tareas resueltas*
 • \`!tareas\` — Ver todas las tareas resueltas
-• \`!buscar-tarea [materia]\` — Buscar por materia
+• \`!ver-tarea [n]\` — Ver detalle de una tarea por su número
+• \`!buscar-tarea [consulta]\` — Buscar tareas por materia, título o descripción
 • \`!proponer-tarea materia | título | desc | link\` — Proponer una tarea para que la revise un admin
+
+📝 *Apuntes*
+• \`!apuntes\` — Ver todos los apuntes disponibles
+• \`!ver-apuntes [n]\` — Ver detalle de un apunte por su número
+• \`!buscar-apuntes [consulta]\` — Buscar apuntes por materia, título o descripción
+• \`!proponer-apuntes materia | título | desc | link\` — Compartir tus apuntes para que un admin los apruebe
 
 ❓ *Preguntas*
 • \`!pregunta [texto]\` — Enviar pregunta anónima al grupo _(solo desde privado)_
-• \`!responder [texto]\` — Responder citando el mensaje de la pregunta en el grupo
+• _Responde citando el mensaje de la pregunta para ganar puntos_
 • \`!preguntas\` — Ver preguntas recientes con sus respuestas
 
 🏆 *Estadísticas*
@@ -151,10 +184,15 @@ const HELP_ADMIN = `
 \`!borrar-r [id]\`
 
 📂 *Tareas*
-\`!pendientes\` — Ver propuestas en revisión
+\`!pendientes\` — Ver propuestas de tareas y apuntes en revisión
 \`!aprobar [id]\`
 \`!rechazar [id] [motivo]\`
 \`!borrar-tarea [id]\`
+
+📝 *Apuntes*
+\`!aprobar [id]\`
+\`!rechazar [id] [motivo]\`
+\`!borrar-apuntes [id]\`
 
 ❓ *FAQ*
 \`!add-faq keyword1,keyword2 | Pregunta | Respuesta\`
@@ -173,6 +211,9 @@ const HELP_ADMIN = `
 \`!resumen-semanal\`
 \`!test-actividad\`
 \`!inactivos\`
+
+📢 *Difusión*
+\`!todos [mensaje]\` — Enviar mensaje privado a todos los miembros del grupo
 `.trim();
 
 // ─── Message handler ──────────────────────────────────────────────────────────
@@ -193,6 +234,44 @@ client.on('message', async msg => {
     // ── Moderación (solo en grupos) ──────────────────────────────────────────
     if (isGroup && !body.startsWith(pfx)) {
       await runModeration(msg, config);
+
+      // ── Auto-respuesta a preguntas anónimas (reply sin comando) ─────────────
+      if (msg.hasQuotedMsg && body.length > 5) {
+        const result = await processAnswer(msg, number, name, body);
+        switch (result.status) {
+          case 'not_a_question':
+            break; // no es una pregunta anónima, ignorar silenciosamente
+
+          case 'incoherent':
+            await reply(msg,
+              `🤔 Tu respuesta es muy corta.\n\n` +
+              `📌 Pregunta: _"${result.question}"_\n\n` +
+              `_Escribe algo más elaborado para ganar puntos._`
+            );
+            break;
+
+          case 'already_answered':
+            await reply(msg,
+              `✅ Esta pregunta ya fue respondida por *${result.firstAnswerer}*.\n\n` +
+              `Tu respuesta igual quedó guardada como aporte adicional, pero los puntos son del primero. 👍`
+            );
+            break;
+
+          case 'accepted':
+            await reply(msg,
+              `🎉 *¡Respuesta aceptada!*\n\n` +
+              `📌 Pregunta: _"${result.question}"_\n` +
+              `💬 Tu respuesta quedó guardada y vinculada.\n\n` +
+              `⭐ *+3 puntos* en el leaderboard. ¡Gracias por ayudar!`
+            );
+            break;
+
+          case 'api_error':
+            await reply(msg, '⚠️ No se pudo validar la respuesta automáticamente. Un admin la revisará.');
+            break;
+        }
+      }
+
       return;
     }
 
@@ -414,30 +493,51 @@ client.on('message', async msg => {
     if (cmd === 'tareas') {
       const list = storage.getHomework();
       if (!list.length) { await reply(msg, '📭 No hay tareas guardadas aún.'); return; }
-      const bySubject = list.reduce((acc, hw) => {
-        if (!acc[hw.subject]) acc[hw.subject] = [];
-        acc[hw.subject].push(hw);
-        return acc;
-      }, {});
-      const sections = Object.entries(bySubject).map(([s, hws]) =>
-        `📚 *${s}* (${hws.length})\n${hws.map(h => `   • ${h.title}`).join('\n')}`
+      const lines = list.map((hw, i) =>
+        `*${i + 1}.* [${hw.subject}] ${hw.title}`
       );
-      await reply(msg, `📋 *Tareas disponibles:*\n\n${sections.join('\n\n')}\n\n_Usa \`!buscar-tarea [materia]\` para ver links y detalles_`);
+      await reply(msg, `📋 *Tareas disponibles (${list.length}):*\n\n${lines.join('\n')}\n\n_Usa \`!ver-tarea [número]\` para ver los detalles_`);
       return;
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // !buscar-tarea
+    // !ver-tarea [n]
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'ver-tarea') {
+      if (!args) { await reply(msg, '🔍 Uso: `!ver-tarea [número]`\n\nEjemplo: `!ver-tarea 3`\n\nUsa `!tareas` para ver la lista con números.'); return; }
+      const list = storage.getHomework();
+      const n = parseInt(args.trim(), 10);
+      if (isNaN(n) || n < 1 || n > list.length) {
+        await reply(msg, `❌ Número inválido. Hay ${list.length} tarea(s). Usa \`!tareas\` para ver la lista.`);
+        return;
+      }
+      const hw = list[n - 1];
+      await reply(msg,
+        `📚 *Tarea #${n}*\n\n📖 *Materia:* ${hw.subject}\n📌 *Título:* ${hw.title}\n📝 *Descripción:* ${hw.description}\n🔗 *Link:* ${hw.link || 'Sin link'}\n👤 *Por:* ${hw.proposedBy || 'Admin'}`
+      );
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !buscar-tarea [consulta]
     // ══════════════════════════════════════════════════════════════════════════
     if (cmd === 'buscar-tarea') {
-      if (!args) { await reply(msg, '🔍 Uso: `!buscar-tarea [materia o palabra]`'); return; }
-      const results = storage.searchHomework(args);
-      if (!results.length) { await reply(msg, `🔍 No encontré tareas para *"${args}"*.`); return; }
-      const lines = results.slice(0, 5).map(hw =>
-        `📚 *${hw.subject}* — ${hw.title}\n   📝 ${hw.description}\n   🔗 ${hw.link || 'Sin link'}\n   👤 Por: ${hw.proposedBy || 'Admin'}\n   🆔 \`${hw.id}\``
-      );
-      const extra = results.length > 5 ? `\n\n_...y ${results.length - 5} más. Sé más específico._` : '';
-      await reply(msg, `🔍 *"${args}" — ${results.length} resultado(s):*\n\n${lines.join('\n\n')}${extra}`);
+      if (!args) { await reply(msg, '🔍 Uso: `!buscar-tarea [consulta]`\n\nEjemplo: `!buscar-tarea algoritmos`\n\nBusca por materia, título o descripción.'); return; }
+      const allHomework = storage.getHomework();
+      const query = args.trim().toLowerCase();
+      const results = allHomework
+        .map((hw, i) => ({ hw, n: i + 1 }))
+        .filter(({ hw }) =>
+          hw.subject.toLowerCase().includes(query) ||
+          hw.title.toLowerCase().includes(query) ||
+          (hw.description || '').toLowerCase().includes(query)
+        );
+      if (!results.length) {
+        await reply(msg, `🔍 No se encontraron tareas para *"${args.trim()}"*.\n\nUsa \`!tareas\` para ver todas las disponibles.`);
+        return;
+      }
+      const lines = results.map(({ hw, n }) => `*${n}.* [${hw.subject}] ${hw.title}`);
+      await reply(msg, `🔍 *Resultados para "${args.trim()}" (${results.length}):*\n\n${lines.join('\n')}\n\n_Usa \`!ver-tarea [número]\` para ver los detalles_`);
       return;
     }
 
@@ -447,12 +547,20 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     if (cmd === 'proponer-tarea') {
       if (!args) {
-        await reply(msg, '📥 Uso:\n`!proponer-tarea materia | título | descripción | link (opcional)`\n\nEjemplo:\n`!proponer-tarea Álgebra | TP Matrices | Resuelto con Gauss-Jordan | https://drive.google.com/...`');
+        const subjectList = (config.subjects || []).map(s => `• ${s.name}`).join('\n');
+        const subjectHint = subjectList ? `\n\n📚 *Materias disponibles:*\n${subjectList}` : '';
+        await reply(msg, `📥 Uso:\n\`!proponer-tarea materia | título | descripción | link (opcional)\`\n\nEjemplo:\n\`!proponer-tarea Algoritmos I | TP1 | Resuelto con recursión\`${subjectHint}`);
         return;
       }
       const parts = args.split('|').map(p => p.trim());
       if (parts.length < 3) { await reply(msg, '❌ Faltan campos. Mínimo: `materia | título | descripción`'); return; }
-      const [subject, title, description, link] = parts;
+      let [subjectInput, title, description, link] = parts;
+
+      // Resolve subject against configured list (normalizes name + auto-fills drive link)
+      const resolved = resolveSubject(subjectInput);
+      const subject = resolved ? resolved.name : subjectInput;
+      if (!link && resolved?.driveFolder) link = resolved.driveFolder;
+
       const saved = storage.savePending({ subject, title, description, link: link || null, proposedBy: number, proposedByName: name });
       storage.incrementStat(number, name, 'tasksProposed');
       await reply(msg,
@@ -474,12 +582,23 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     if (cmd === 'pendientes') {
       if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
-      const list = storage.getPending();
-      if (!list.length) { await reply(msg, '✅ No hay propuestas pendientes de revisión.'); return; }
-      const lines = list.map(p =>
-        `📚 *${p.subject}* — ${p.title}\n   📝 ${p.description}\n   🔗 ${p.link || '—'}\n   👤 ${p.proposedByName || p.proposedBy}\n   🆔 \`${p.id}\``
-      );
-      await reply(msg, `📥 *Propuestas pendientes (${list.length}):*\n\n${lines.join('\n\n')}\n\nAprueba: \`!aprobar [id]\`\nRechaza: \`!rechazar [id] [motivo]\``);
+      const tasks = storage.getPending();
+      const notes = storage.getPendingNotes();
+      if (!tasks.length && !notes.length) { await reply(msg, '✅ No hay propuestas pendientes de revisión.'); return; }
+      const parts = [];
+      if (tasks.length) {
+        const taskLines = tasks.map(p =>
+          `📂 *[TAREA]* ${p.subject} — ${p.title}\n   📝 ${p.description}\n   🔗 ${p.link || '—'}\n   👤 ${p.proposedByName || p.proposedBy}\n   🆔 \`${p.id}\``
+        );
+        parts.push(`📂 *Tareas (${tasks.length}):*\n\n${taskLines.join('\n\n')}`);
+      }
+      if (notes.length) {
+        const noteLines = notes.map(p =>
+          `📝 *[APUNTES]* ${p.subject} — ${p.title}\n   📝 ${p.description}\n   🔗 ${p.link || '—'}\n   👤 ${p.proposedByName || p.proposedBy}\n   🆔 \`${p.id}\``
+        );
+        parts.push(`📝 *Apuntes (${notes.length}):*\n\n${noteLines.join('\n\n')}`);
+      }
+      await reply(msg, `📥 *Propuestas pendientes (${tasks.length + notes.length}):*\n\n${parts.join('\n\n')}\n\nAprueba: \`!aprobar [id]\`\nRechaza: \`!rechazar [id] [motivo]\``);
       return;
     }
 
@@ -489,33 +608,65 @@ client.on('message', async msg => {
     if (cmd === 'aprobar') {
       if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
       if (!args) { await reply(msg, '❌ Uso: `!aprobar [id]`'); return; }
-      const pending = storage.getPending().find(p => p.id === args.trim());
-      if (!pending) { await reply(msg, `❌ No encontré la propuesta \`${args.trim()}\``); return; }
+      const trimmedId = args.trim();
 
-      storage.saveHomework({
-        subject: pending.subject, title: pending.title,
-        description: pending.description, link: pending.link,
-        proposedBy: pending.proposedByName || pending.proposedBy,
-        approvedBy: name,
-      });
-      storage.deletePending(pending.id);
-      storage.incrementStat(pending.proposedBy, pending.proposedByName, 'tasksApproved');
+      // Check pending tasks first
+      const pendingTask = storage.getPending().find(p => p.id === trimmedId);
+      if (pendingTask) {
+        storage.saveHomework({
+          subject: pendingTask.subject, title: pendingTask.title,
+          description: pendingTask.description, link: pendingTask.link,
+          proposedBy: pendingTask.proposedByName || pendingTask.proposedBy,
+          approvedBy: name,
+        });
+        storage.deletePending(pendingTask.id);
+        storage.incrementStat(pendingTask.proposedBy, pendingTask.proposedByName, 'tasksApproved');
 
-      await reply(msg, `✅ Tarea *"${pending.title}"* aprobada y publicada.`);
+        await reply(msg, `✅ Tarea *"${pendingTask.title}"* aprobada y publicada.`);
 
-      // Avisar al grupo
-      try {
-        await client.sendMessage(config.groupId,
-          `📚 *Nueva tarea disponible*\n\n*${pending.subject}* — ${pending.title}\n📝 ${pending.description}\n🔗 ${pending.link || '—'}\n\n¡Gracias @${pending.proposedBy} por compartir! 🙌`
-        );
-      } catch (e) {}
+        try {
+          await client.sendMessage(config.groupId,
+            `📚 *Nueva tarea disponible*\n\n*${pendingTask.subject}* — ${pendingTask.title}\n📝 ${pendingTask.description}\n🔗 ${pendingTask.link || '—'}\n\n¡Gracias @${pendingTask.proposedBy} por compartir! 🙌`
+          );
+        } catch (e) {}
 
-      // Avisar al que propuso
-      try {
-        await client.sendMessage(`${pending.proposedBy}@c.us`,
-          `🎉 ¡Tu tarea *"${pending.title}"* fue aprobada y ya está disponible en el grupo!\n\n+7 puntos en el leaderboard 🏆`
-        );
-      } catch (e) {}
+        try {
+          await client.sendMessage(`${pendingTask.proposedBy}@c.us`,
+            `🎉 ¡Tu tarea *"${pendingTask.title}"* fue aprobada y ya está disponible en el grupo!\n\n+7 puntos en el leaderboard 🏆`
+          );
+        } catch (e) {}
+        return;
+      }
+
+      // Check pending notes
+      const pendingNote = storage.getPendingNotes().find(p => p.id === trimmedId);
+      if (pendingNote) {
+        storage.saveNote({
+          subject: pendingNote.subject, title: pendingNote.title,
+          description: pendingNote.description, link: pendingNote.link,
+          proposedBy: pendingNote.proposedByName || pendingNote.proposedBy,
+          approvedBy: name,
+        });
+        storage.deletePendingNote(pendingNote.id);
+        storage.incrementStat(pendingNote.proposedBy, pendingNote.proposedByName, 'notesApproved');
+
+        await reply(msg, `✅ Apuntes *"${pendingNote.title}"* aprobados y publicados.`);
+
+        try {
+          await client.sendMessage(config.groupId,
+            `📝 *Nuevos apuntes disponibles*\n\n*${pendingNote.subject}* — ${pendingNote.title}\n📝 ${pendingNote.description}\n🔗 ${pendingNote.link || '—'}\n\n¡Gracias @${pendingNote.proposedBy} por compartir! 🙌`
+          );
+        } catch (e) {}
+
+        try {
+          await client.sendMessage(`${pendingNote.proposedBy}@c.us`,
+            `🎉 ¡Tus apuntes *"${pendingNote.title}"* fueron aprobados y ya están disponibles en el grupo!\n\n+7 puntos en el leaderboard 🏆`
+          );
+        } catch (e) {}
+        return;
+      }
+
+      await reply(msg, `❌ No encontré la propuesta \`${trimmedId}\``);
       return;
     }
 
@@ -527,17 +678,34 @@ client.on('message', async msg => {
       const [id, ...motivoParts] = args.split(' ');
       const motivo = motivoParts.join(' ') || 'Sin motivo especificado';
       if (!id) { await reply(msg, '❌ Uso: `!rechazar [id] [motivo opcional]`'); return; }
-      const pending = storage.getPending().find(p => p.id === id.trim());
-      if (!pending) { await reply(msg, `❌ No encontré la propuesta \`${id}\``); return; }
 
-      storage.deletePending(pending.id);
-      await reply(msg, `🗑️ Propuesta *"${pending.title}"* rechazada.`);
+      // Check pending tasks first
+      const pendingTask = storage.getPending().find(p => p.id === id.trim());
+      if (pendingTask) {
+        storage.deletePending(pendingTask.id);
+        await reply(msg, `🗑️ Tarea *"${pendingTask.title}"* rechazada.`);
+        try {
+          await client.sendMessage(`${pendingTask.proposedBy}@c.us`,
+            `❌ Tu propuesta de tarea *"${pendingTask.title}"* fue rechazada.\n\n📝 Motivo: ${motivo}\n\nSi tienes dudas, contacta a un admin.`
+          );
+        } catch (e) {}
+        return;
+      }
 
-      try {
-        await client.sendMessage(`${pending.proposedBy}@c.us`,
-          `❌ Tu propuesta *"${pending.title}"* fue rechazada.\n\n📝 Motivo: ${motivo}\n\nSi tienes dudas, contacta a un admin.`
-        );
-      } catch (e) {}
+      // Check pending notes
+      const pendingNote = storage.getPendingNotes().find(p => p.id === id.trim());
+      if (pendingNote) {
+        storage.deletePendingNote(pendingNote.id);
+        await reply(msg, `🗑️ Apuntes *"${pendingNote.title}"* rechazados.`);
+        try {
+          await client.sendMessage(`${pendingNote.proposedBy}@c.us`,
+            `❌ Tu propuesta de apuntes *"${pendingNote.title}"* fue rechazada.\n\n📝 Motivo: ${motivo}\n\nSi tienes dudas, contacta a un admin.`
+          );
+        } catch (e) {}
+        return;
+      }
+
+      await reply(msg, `❌ No encontré la propuesta \`${id}\``);
       return;
     }
 
@@ -551,6 +719,109 @@ client.on('message', async msg => {
       storage.deleteHomework(args.trim());
       await reply(msg, before > storage.getHomework().length
         ? '🗑️ Tarea eliminada.'
+        : `❌ No encontré el ID \`${args.trim()}\``
+      );
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !apuntes
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'apuntes') {
+      const list = storage.getNotes();
+      if (!list.length) { await reply(msg, '📭 No hay apuntes guardados aún.'); return; }
+      const lines = list.map((n, i) =>
+        `*${i + 1}.* [${n.subject}] ${n.title}`
+      );
+      await reply(msg, `📝 *Apuntes disponibles (${list.length}):*\n\n${lines.join('\n')}\n\n_Usa \`!ver-apuntes [número]\` para ver los detalles_`);
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !ver-apuntes [n]
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'ver-apuntes') {
+      if (!args) { await reply(msg, '🔍 Uso: `!ver-apuntes [número]`\n\nEjemplo: `!ver-apuntes 2`\n\nUsa `!apuntes` para ver la lista con números.'); return; }
+      const list = storage.getNotes();
+      const n = parseInt(args.trim(), 10);
+      if (isNaN(n) || n < 1 || n > list.length) {
+        await reply(msg, `❌ Número inválido. Hay ${list.length} apunte(s). Usa \`!apuntes\` para ver la lista.`);
+        return;
+      }
+      const note = list[n - 1];
+      await reply(msg,
+        `📝 *Apuntes #${n}*\n\n📖 *Materia:* ${note.subject}\n📌 *Título:* ${note.title}\n📝 *Descripción:* ${note.description}\n🔗 *Link:* ${note.link || 'Sin link'}\n👤 *Por:* ${note.proposedBy || 'Admin'}`
+      );
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !buscar-apuntes [consulta]
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'buscar-apuntes') {
+      if (!args) { await reply(msg, '🔍 Uso: `!buscar-apuntes [consulta]`\n\nEjemplo: `!buscar-apuntes cálculo`\n\nBusca por materia, título o descripción.'); return; }
+      const allNotes = storage.getNotes();
+      const query = args.trim().toLowerCase();
+      const results = allNotes
+        .map((note, i) => ({ note, n: i + 1 }))
+        .filter(({ note }) =>
+          note.subject.toLowerCase().includes(query) ||
+          note.title.toLowerCase().includes(query) ||
+          (note.description || '').toLowerCase().includes(query)
+        );
+      if (!results.length) {
+        await reply(msg, `🔍 No se encontraron apuntes para *"${args.trim()}"*.\n\nUsa \`!apuntes\` para ver todos los disponibles.`);
+        return;
+      }
+      const lines = results.map(({ note, n }) => `*${n}.* [${note.subject}] ${note.title}`);
+      await reply(msg, `🔍 *Resultados para "${args.trim()}" (${results.length}):*\n\n${lines.join('\n')}\n\n_Usa \`!ver-apuntes [número]\` para ver los detalles_`);
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !proponer-apuntes  (cualquiera)
+    // Formato: materia | título | descripción | link (opcional)
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'proponer-apuntes') {
+      if (!args) {
+        const subjectList = (config.subjects || []).map(s => `• ${s.name}`).join('\n');
+        const subjectHint = subjectList ? `\n\n📚 *Materias disponibles:*\n${subjectList}` : '';
+        await reply(msg, `📥 Uso:\n\`!proponer-apuntes materia | título | descripción | link (opcional)\`\n\nEjemplo:\n\`!proponer-apuntes Cálculo I | Parcial 1 | Apuntes del primer parcial con teoremas\`\n\nSi no incluyes link, se usará la carpeta de apuntes de la materia.${subjectHint}`);
+        return;
+      }
+      const parts = args.split('|').map(p => p.trim());
+      if (parts.length < 3) { await reply(msg, '❌ Faltan campos. Mínimo: `materia | título | descripción`'); return; }
+      let [subjectInput, title, description, link] = parts;
+
+      const resolved = resolveSubject(subjectInput);
+      const subject = resolved ? resolved.name : subjectInput;
+      if (!link && resolved?.notesFolder) link = resolved.notesFolder;
+
+      const saved = storage.savePendingNote({ subject, title, description, link: link || null, proposedBy: number, proposedByName: name });
+      storage.incrementStat(number, name, 'notesProposed');
+      await reply(msg,
+        `✅ *Apuntes enviados para revisión*\n\n📚 ${subject} — ${title}\n📝 ${description}\n🔗 ${link || '—'}\n\n_Un admin los revisará pronto. ¡Gracias por compartir!_ 🙏`
+      );
+      for (const adminNum of config.admins) {
+        try {
+          await client.sendMessage(`${adminNum}@c.us`,
+            `📥 *Nuevos apuntes propuestos para revisión*\n\n👤 ${name}\n📚 ${subject} — ${title}\n📝 ${description}\n🔗 ${link || '—'}\n🆔 \`${saved.id}\`\n\nAprueba con: \`!aprobar ${saved.id}\`\nRechaza con: \`!rechazar ${saved.id} [motivo]\``
+          );
+        } catch (e) { /* admin puede no tener chat abierto */ }
+      }
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !borrar-apuntes [id] (ADMIN)
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'borrar-apuntes') {
+      if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
+      if (!args) { await reply(msg, '❌ Uso: `!borrar-apuntes [id]`'); return; }
+      const before = storage.getNotes().length;
+      storage.deleteNote(args.trim());
+      await reply(msg, before > storage.getNotes().length
+        ? '🗑️ Apuntes eliminados.'
         : `❌ No encontré el ID \`${args.trim()}\``
       );
       return;
@@ -572,73 +843,10 @@ client.on('message', async msg => {
       try {
         await publishQuestion(client, config, number, name, args);
         await reply(msg, config.anonymous.confirmMessage +
-          '\n\n_Alguien que sepa puede responder citando el mensaje en el grupo con_ `!responder [respuesta]`.');
+          '\n\n_Alguien que sepa puede responder citando el mensaje en el grupo._');
       } catch (err) {
         await reply(msg, '❌ Error al publicar en el grupo. Contacta a un admin.');
         console.error('[ANON QUESTION ERROR]', err);
-      }
-      return;
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // !responder [respuesta]
-    // DEBE usarse citando (reply) el mensaje de la pregunta anónima en el grupo.
-    // Solo la primera respuesta válida gana puntos. 
-    // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'responder') {
-      if (!isGroup) {
-        await reply(msg, '💬 Este comando úsalo en el grupo, citando el mensaje de la pregunta anónima.');
-        return;
-      }
-      if (!args) {
-        await reply(msg, '💬 Uso: cita el mensaje de la pregunta y escribe `!responder [tu respuesta]`');
-        return;
-      }
-
-      const result = await processAnswer(msg, number, name, args);
-
-      switch (result.status) {
-        case 'no_quote':
-          await reply(msg,
-            '❌ Para responder, debes *citar* el mensaje de la pregunta anónima.\n\n' +
-            '_Mantén presionado el mensaje de la pregunta → Responder, y luego escribe_ `!responder [tu respuesta]`'
-          );
-          break;
-
-        case 'not_a_question':
-          await reply(msg, '❌ El mensaje que estás citando no corresponde a ninguna pregunta anónima registrada.');
-          break;
-
-        case 'incoherent':
-          await reply(msg,
-            `🤔 Tu respuesta no parece estar relacionada con la pregunta.\n\n` +
-            `📌 Pregunta: _"${result.question}"_\n` +
-            `💡 ${result.reason}\n\n` +
-            `_Intenta con una respuesta más específica para ganar puntos._`
-          );
-          break;
-
-        case 'already_answered':
-          await reply(msg,
-            `✅ Esta pregunta ya fue respondida por *${result.firstAnswerer}*.\n\n` +
-            `Tu respuesta igual quedó guardada como aporte adicional, pero los puntos son del primero. 👍\n\n` +
-            `_Usa \`!preguntas\` para ver las respuestas guardadas._`
-          );
-          break;
-
-        case 'accepted':
-          await reply(msg,
-            `🎉 *¡Respuesta aceptada!*\n\n` +
-            `📌 Pregunta: _"${result.question}"_\n` +
-            `💬 Tu respuesta quedó guardada y vinculada.\n\n` +
-            `⭐ *+3 puntos* en el leaderboard. ¡Gracias por ayudar!`
-          );
-          break;
-
-        case 'api_error':
-          // Fallback: aceptar igual pero sin puntos confirmados
-          await reply(msg, '⚠️ No se pudo validar la respuesta automáticamente. Un admin la revisará.');
-          break;
       }
       return;
     }
@@ -705,7 +913,7 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     if (cmd === 'puntos') {
       const text = buildUserStats(number);
-      await reply(msg, text || '📊 Aún no tienes estadísticas. ¡Empieza a proponer tareas y responder preguntas!');
+      await reply(msg, text || '📊 Aún no tienes estadísticas. ¡Empieza a proponer tareas/recordatorios y responder preguntas!');
       return;
     }
 
@@ -715,14 +923,14 @@ client.on('message', async msg => {
     if (cmd === 'premio') {
       const prize = storage.getPrize();
       if (!prize) {
-        await reply(msg, '🎁 *Premio del leaderboard*\n\nAún no hay un premio configurado.\n\n_Los admins pueden configurarlo con_ `!conf-premio`');
+        await reply(msg, '🎁 *Premio al líder de la tabla*\n\nAún no hay un premio configurado.\n\n_Los admins pueden configurarlo con_ `!conf-premio`');
       } else {
         await reply(msg,
-          `🎁 *Premio del leaderboard*\n\n` +
+          `🎁 *Premio al líder de la tabla*\n\n` +
           `🏆 Premio: *${prize.prize}*\n` +
           `🎯 Meta: *${prize.points} puntos*\n` +
           `🤝 Patrocinado por: *${prize.sponsor}*\n\n` +
-          `_¡Acumula puntos proponiendo tareas y respondiendo preguntas!_`
+          `_¡Acumula puntos proponiendo tareas/recordatorios y respondiendo preguntas (anónimas)!_`
         );
       }
       return;
@@ -735,7 +943,7 @@ client.on('message', async msg => {
       if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
       const parts = args.split('|').map(s => s.trim());
       if (parts.length < 3 || !parts[0] || !parts[1] || !parts[2]) {
-        await reply(msg, '❌ Uso:\n`!conf-premio Premio | Puntos | Patrocinador`\n\nEjemplo:\n`!conf-premio Audífonos Sony | 100 | Librería Central`');
+        await reply(msg, '❌ Uso:\n`!conf-premio Premio | Puntos | Patrocinador`\n\nEjemplo:\n`!conf-premio Salchipapa | 100 | Librería Central`');
         return;
       }
       const pts = parseInt(parts[1]);
@@ -891,6 +1099,39 @@ client.on('message', async msg => {
       }
       const lines = inactive.map(e => `• ${e.name} (+${e.num}): ${e.days} días${e.warnedAt ? ' ⚠️ advertido' : ''}`);
       await reply(msg, `😴 *Usuarios inactivos (≥${warnDays} días)*\n\n${lines.join('\n')}`);
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !todos [mensaje] (ADMIN) — Enviar mensaje privado a todos los miembros
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'all') {
+      if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
+      if (!args) { await reply(msg, '❌ Uso: `!todos [mensaje]`\n\nEjemplo: `!todos Recuerden entregar el TP antes del viernes.`'); return; }
+      if (!isGroup) { await reply(msg, '⚠️ Este comando solo funciona desde el grupo.'); return; }
+
+      const groupChat = await msg.getChat();
+      const participants = groupChat.participants || [];
+      const nonAdminParticipants = participants.filter(p => {
+        const pNum = p.id.user;
+        return !isAdmin(pNum) && pNum !== client.info.wid.user;
+      });
+
+      await reply(msg, `📤 Enviando mensaje privado a ${nonAdminParticipants.length} miembro(s)...`);
+
+      let sent = 0;
+      let failed = 0;
+      for (const participant of nonAdminParticipants) {
+        try {
+          await client.sendMessage(`${participant.id.user}@c.us`, `📢 *Mensaje del grupo:*\n\n${args}`);
+          sent++;
+        } catch (e) {
+          failed++;
+        }
+      }
+
+      await reply(msg, `✅ Mensaje enviado a ${sent} miembro(s)${failed > 0 ? ` (${failed} fallaron — pueden tener el chat privado cerrado)` : ''}.`);
+      storage.log('broadcast', { by: number, message: args, sent, failed });
       return;
     }
 

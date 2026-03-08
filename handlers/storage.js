@@ -8,6 +8,8 @@ const FILES = {
   pendingReminders: path.join(__dirname, '../data/pending-reminders.json'),
   homework:         path.join(__dirname, '../data/homework.json'),
   pending:          path.join(__dirname, '../data/pending.json'),
+  notes:            path.join(__dirname, '../data/notes.json'),
+  pendingNotes:     path.join(__dirname, '../data/pending-notes.json'),
   faqs:             path.join(__dirname, '../data/faqs.json'),
   stats:            path.join(__dirname, '../data/stats.json'),
   muted:            path.join(__dirname, '../data/muted.json'),
@@ -98,6 +100,38 @@ function savePending(data) {
   return entry;
 }
 
+// ─── Notes (apuntes aprobados) ────────────────────────────────────────────────
+
+const getNotes    = ()       => read('notes');
+const deleteNote  = (id)     => write('notes', getNotes().filter(n => n.id !== id));
+const searchNotes = (query)  => {
+  const q = query.toLowerCase();
+  return getNotes().filter(n =>
+    n.subject.toLowerCase().includes(q) ||
+    n.title.toLowerCase().includes(q) ||
+    (n.description || '').toLowerCase().includes(q)
+  );
+};
+function saveNote(data) {
+  const list = getNotes();
+  const entry = { id: genId(), ...data, savedAt: new Date().toISOString() };
+  list.push(entry);
+  write('notes', list);
+  return entry;
+}
+
+// ─── Pending notes (apuntes propuestos esperando aprobación) ──────────────────
+
+const getPendingNotes    = ()    => read('pendingNotes');
+const deletePendingNote  = (id)  => write('pendingNotes', getPendingNotes().filter(p => p.id !== id));
+function savePendingNote(data) {
+  const list = getPendingNotes();
+  const entry = { id: genId(), ...data, proposedAt: new Date().toISOString(), status: 'pending' };
+  list.push(entry);
+  write('pendingNotes', list);
+  return entry;
+}
+
 // ─── FAQs ─────────────────────────────────────────────────────────────────────
 
 const getFaqs    = ()    => read('faqs');
@@ -134,6 +168,8 @@ function incrementStat(number, name, metric, amount = 1) {
       name,
       tasksProposed: 0,
       tasksApproved: 0,
+      notesProposed: 0,
+      notesApproved: 0,
       questionsAnswered: 0,
       questionsAsked: 0,
       remindersApproved: 0,
@@ -142,24 +178,28 @@ function incrementStat(number, name, metric, amount = 1) {
   }
   stats[number].name = name; // actualiza nombre si cambió
   if (!stats[number].remindersApproved) stats[number].remindersApproved = 0;
+  if (!stats[number].notesProposed) stats[number].notesProposed = 0;
+  if (!stats[number].notesApproved) stats[number].notesApproved = 0;
   stats[number][metric] = (stats[number][metric] || 0) + amount;
 
   // Recalcular puntos:
-  // Tarea aprobada = 7 pts (+3 de propuesta = 10 total), Propuesta = 3 pts,
+  // Tarea/apunte aprobado = 7 pts (+3 de propuesta = 10 total), Propuesta = 3 pts,
   // Respuesta = 3 pts, Pregunta = 1 pt, Recordatorio aprobado = 1 pt
   const s = stats[number];
   s.totalPoints =
-    (s.tasksApproved    * 7) +
-    (s.tasksProposed    * 3) +
-    (s.questionsAnswered * 3) +
-    (s.questionsAsked   * 1) +
+    (s.tasksApproved     * 7) +
+    (s.tasksProposed     * 3) +
+    (s.notesApproved     * 6) +
+    (s.notesProposed     * 2) +
+    (s.questionsAnswered * 2) +
+    (s.questionsAsked    * 1) +
     (s.remindersApproved * 1);
 
   write('stats', stats);
   return stats[number];
 }
 
-function getLeaderboard(limit = 10) {
+function getLeaderboard(limit = 5) {
   const stats = getStats();
   return Object.entries(stats)
     .map(([number, data]) => ({ number, ...data }))
@@ -288,6 +328,10 @@ module.exports = {
   getHomework, saveHomework, deleteHomework, searchHomework,
   // pending homework
   getPending, savePending, deletePending,
+  // notes
+  getNotes, saveNote, deleteNote, searchNotes,
+  // pending notes
+  getPendingNotes, savePendingNote, deletePendingNote,
   // faq
   getFaqs, saveFaq, deleteFaq, matchFaq,
   // stats
