@@ -21,11 +21,11 @@
 //   !admins                     — Ver administradores
 //
 // COMANDOS ADMIN:
-//   !recordatorio "T" YYYY-MM-DD [desc]  — Agregar recordatorio
-//   !borrar-r [id]                        — Borrar recordatorio
-//   !pendientes                           — Ver tareas y apuntes esperando revisión
-//   !aprobar [id]                         — Aprobar tarea o apuntes propuestos
-//   !rechazar [id] [motivo]               — Rechazar tarea o apuntes propuestos
+//   !recordatorio "T" YYYY-MM-DD [desc]   — Agregar recordatorio
+//   !borrar-recordatorio [id]             — Borrar recordatorio
+//   !pendientes                           — Ver todas las propuestas esperando revisión (tareas, apuntes, recordatorios)
+//   !aprobar [id]                         — Aprobar tarea, apuntes o recordatorio propuesto
+//   !rechazar [id] [motivo]               — Rechazar tarea, apuntes o recordatorio propuesto
 //   !borrar-tarea [id]                    — Borrar tarea aprobada
 //   !borrar-apuntes [id]                  — Borrar apuntes aprobados
 //   !add-faq [keyword1,keyword2] | [q] | [a]  — Agregar FAQ
@@ -178,20 +178,13 @@ const HELP_ADMIN = `
 
 📌 *Recordatorios*
 \`!recordatorio "Título" YYYY-MM-DD [desc]\` — Agregar directo
-\`!recordatorios-pendientes\` — Ver sugerencias esperando aprobación
-\`!aprobar-r [id]\`
-\`!rechazar-r [id] [motivo]\`
-\`!borrar-r [id]\`
+\`!borrar-recordatorio [id]\`
 
-📂 *Tareas*
-\`!pendientes\` — Ver propuestas de tareas y apuntes en revisión
-\`!aprobar [id]\`
-\`!rechazar [id] [motivo]\`
+📋 *Propuestas (tareas, apuntes y recordatorios)*
+\`!pendientes\` — Ver todas las propuestas esperando aprobación
+\`!aprobar [id]\` — Aprobar cualquier propuesta
+\`!rechazar [id] [motivo]\` — Rechazar cualquier propuesta
 \`!borrar-tarea [id]\`
-
-📝 *Apuntes*
-\`!aprobar [id]\`
-\`!rechazar [id] [motivo]\`
 \`!borrar-apuntes [id]\`
 
 ❓ *FAQ*
@@ -319,8 +312,8 @@ client.on('message', async msg => {
       if (!list.length) { await reply(msg, '📭 No hay recordatorios pendientes.'); return; }
       const lines = list.map(r => {
         const diff = daysDiff(r.date);
-        const when = diff === 0 ? '🚨 HOY' : diff === 1 ? '⚠️ Mañana' : diff <= 3 ? `⏰ ${diff} días` : `📅 ${diff} días`;
-        return `${when} — *${r.title}*\n   📅 ${formatDate(r.date)}\n   📝 ${r.description || '—'}\n   🆔 \`${r.id}\``;
+        const when = diff === 0 ? '🚨 HOY' : diff === 1 ? '⚠️ Mañana' : diff <= 3 ? `⏰ ${diff} días` : `▶ ${diff} días`;
+        return `${when} — *${r.title}*\n   📅 ${formatDate(r.date)}\n   📝 ${r.description || '—'}`;
       });
       await reply(msg, `📋 *Recordatorios (${list.length}):*\n\n${lines.join('\n\n')}`);
       return;
@@ -330,7 +323,7 @@ client.on('message', async msg => {
     // !proponer-recordatorio  (cualquiera)
     // Formato: !proponer-recordatorio "Título" YYYY-MM-DD descripción opcional
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'proponer-recordatorio') {
+    if (cmd === 'proponer-recordatorio' || cmd === 'p-r') {
       if (!args) {
         await reply(msg, '📌 Uso: `!proponer-recordatorio "Título" YYYY-MM-DD descripción opcional`\n\nEjemplo:\n`!proponer-recordatorio "Entrega TP3" 2025-12-20 Subir al campus antes de las 23:59`');
         return;
@@ -359,8 +352,8 @@ client.on('message', async msg => {
             `🗓️ ${formatDate(saved.date)}\n` +
             `📝 ${saved.description || '—'}\n` +
             `🆔 \`${saved.id}\`\n\n` +
-            `Aprueba con: \`!aprobar-r ${saved.id}\`\n` +
-            `Rechaza con: \`!rechazar-r ${saved.id} [motivo]\``
+            `Aprueba con: \`!aprobar ${saved.id}\`\n` +
+            `Rechaza con: \`!rechazar ${saved.id} [motivo]\``
           );
         } catch (e) {}
       }
@@ -390,94 +383,11 @@ client.on('message', async msg => {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // !recordatorios-pendientes (ADMIN)
+    // !borrar-recordatorio (ADMIN)
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'recordatorios-pendientes') {
+    if (cmd === 'borrar-recordatorio') {
       if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
-      const list = storage.getPendingReminders();
-      if (!list.length) { await reply(msg, '✅ No hay sugerencias de recordatorio pendientes.'); return; }
-      const lines = list.map(p => {
-        const diff = daysDiff(p.date);
-        return `📌 *${p.title}*\n   🗓️ ${formatDate(p.date)} (en ${diff} días)\n   📝 ${p.description || '—'}\n   👤 ${p.suggestedByName || p.suggestedBy}\n   🆔 \`${p.id}\``;
-      });
-      await reply(msg,
-        `📋 *Sugerencias pendientes (${list.length}):*\n\n${lines.join('\n\n')}\n\n` +
-        `Aprueba: \`!aprobar-r [id]\`\nRechaza: \`!rechazar-r [id] [motivo]\``
-      );
-      return;
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // !aprobar-r [id] (ADMIN)
-    // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'aprobar-r') {
-      if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
-      if (!args) { await reply(msg, '❌ Uso: `!aprobar-r [id]`'); return; }
-
-      const pending = storage.getPendingReminders().find(p => p.id === args.trim());
-      if (!pending) { await reply(msg, `❌ No encontré la sugerencia \`${args.trim()}\``); return; }
-
-      const saved = storage.saveReminder({
-        title: pending.title,
-        date: pending.date,
-        description: pending.description,
-        addedBy: pending.suggestedBy,
-        approvedBy: number,
-      });
-      storage.deletePendingReminder(pending.id);
-      storage.incrementStat(pending.suggestedBy, pending.suggestedByName, 'remindersApproved');
-
-      const diff = daysDiff(saved.date);
-      await reply(msg,
-        `✅ Recordatorio *"${saved.title}"* aprobado.\n🗓️ ${formatDate(saved.date)} (en ${diff} días)`
-      );
-
-      // Avisar al grupo
-      try {
-        await client.sendMessage(config.groupId,
-          `📌 *Nuevo recordatorio agregado*\n\n*${saved.title}*\n🗓️ ${formatDate(saved.date)}\n📝 ${saved.description || '—'}\n\n_Sugerido por ${pending.suggestedByName || pending.suggestedBy}_ 🙌`
-        );
-      } catch (e) {}
-
-      // Avisar al que sugirió
-      try {
-        await client.sendMessage(`${pending.suggestedBy}@c.us`,
-          `🎉 Tu sugerencia *"${pending.title}"* fue aprobada y ya está en el grupo.\n\n+1 punto en el leaderboard 🏆`
-        );
-      } catch (e) {}
-      return;
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // !rechazar-r [id] [motivo] (ADMIN)
-    // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'rechazar-r') {
-      if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
-      const [id, ...motivoParts] = args.split(' ');
-      const motivo = motivoParts.join(' ') || 'Sin motivo especificado';
-      if (!id) { await reply(msg, '❌ Uso: `!rechazar-r [id] [motivo opcional]`'); return; }
-
-      const pending = storage.getPendingReminders().find(p => p.id === id.trim());
-      if (!pending) { await reply(msg, `❌ No encontré la sugerencia \`${id}\``); return; }
-
-      storage.deletePendingReminder(pending.id);
-      await reply(msg, `🗑️ Sugerencia *"${pending.title}"* rechazada.`);
-
-      try {
-        await client.sendMessage(`${pending.suggestedBy}@c.us`,
-          `❌ Tu sugerencia de recordatorio *"${pending.title}"* fue rechazada.\n📝 Motivo: ${motivo}`
-        );
-      } catch (e) {}
-      return;
-    }
-
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // !borrar-r (ADMIN)
-    // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'borrar-r') {
-      if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
-      if (!args) { await reply(msg, '❌ Uso: `!borrar-r [id]`'); return; }
+      if (!args) { await reply(msg, '❌ Uso: `!borrar-recordatorio [id]`'); return; }
       const before = storage.getReminders().length;
       storage.deleteReminder(args.trim());
       await reply(msg, before > storage.getReminders().length
@@ -545,7 +455,7 @@ client.on('message', async msg => {
     // !proponer-tarea  (cualquiera)
     // Formato: materia | título | descripción | link
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'proponer-tarea') {
+    if (cmd === 'proponer-tarea' || cmd === 'p-t') {
       if (!args) {
         const subjectList = (config.subjects || []).map(s => `• ${s.name}`).join('\n');
         const subjectHint = subjectList ? `\n\n📚 *Materias disponibles:*\n${subjectList}` : '';
@@ -584,8 +494,16 @@ client.on('message', async msg => {
       if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
       const tasks = storage.getPending();
       const notes = storage.getPendingNotes();
-      if (!tasks.length && !notes.length) { await reply(msg, '✅ No hay propuestas pendientes de revisión.'); return; }
+      const reminders = storage.getPendingReminders();
+      if (!tasks.length && !notes.length && !reminders.length) { await reply(msg, '✅ No hay propuestas pendientes de revisión.'); return; }
       const parts = [];
+      if (reminders.length) {
+        const reminderLines = reminders.map(p => {
+          const diff = daysDiff(p.date);
+          return `📌 *[RECORDATORIO]* ${p.title}\n   🗓️ ${formatDate(p.date)} (en ${diff} días)\n   📝 ${p.description || '—'}\n   👤 ${p.suggestedByName || p.suggestedBy}\n   🆔 \`${p.id}\``;
+        });
+        parts.push(`📌 *Recordatorios (${reminders.length}):*\n\n${reminderLines.join('\n\n')}`);
+      }
       if (tasks.length) {
         const taskLines = tasks.map(p =>
           `📂 *[TAREA]* ${p.subject} — ${p.title}\n   📝 ${p.description}\n   🔗 ${p.link || '—'}\n   👤 ${p.proposedByName || p.proposedBy}\n   🆔 \`${p.id}\``
@@ -598,7 +516,8 @@ client.on('message', async msg => {
         );
         parts.push(`📝 *Apuntes (${notes.length}):*\n\n${noteLines.join('\n\n')}`);
       }
-      await reply(msg, `📥 *Propuestas pendientes (${tasks.length + notes.length}):*\n\n${parts.join('\n\n')}\n\nAprueba: \`!aprobar [id]\`\nRechaza: \`!rechazar [id] [motivo]\``);
+      const total = tasks.length + notes.length + reminders.length;
+      await reply(msg, `📥 *Propuestas pendientes (${total}):*\n\n${parts.join('\n\n')}\n\nAprueba: \`!aprobar [id]\`\nRechaza: \`!rechazar [id] [motivo]\``);
       return;
     }
 
@@ -666,6 +585,36 @@ client.on('message', async msg => {
         return;
       }
 
+      // Check pending reminders
+      const pendingReminder = storage.getPendingReminders().find(p => p.id === trimmedId);
+      if (pendingReminder) {
+        const saved = storage.saveReminder({
+          title: pendingReminder.title,
+          date: pendingReminder.date,
+          description: pendingReminder.description,
+          addedBy: pendingReminder.suggestedBy,
+          approvedBy: number,
+        });
+        storage.deletePendingReminder(pendingReminder.id);
+        storage.incrementStat(pendingReminder.suggestedBy, pendingReminder.suggestedByName, 'remindersApproved');
+
+        const diff = daysDiff(saved.date);
+        await reply(msg, `✅ Recordatorio *"${saved.title}"* aprobado.\n🗓️ ${formatDate(saved.date)} (en ${diff} días)`);
+
+        try {
+          await client.sendMessage(config.groupId,
+            `📌 *Nuevo recordatorio agregado*\n\n*${saved.title}*\n🗓️ ${formatDate(saved.date)}\n📝 ${saved.description || '—'}\n\n_Sugerido por ${pendingReminder.suggestedByName || pendingReminder.suggestedBy}_ 🙌`
+          );
+        } catch (e) {}
+
+        try {
+          await client.sendMessage(`${pendingReminder.suggestedBy}@c.us`,
+            `🎉 Tu sugerencia *"${pendingReminder.title}"* fue aprobada y ya está en el grupo.\n\n+1 punto en el leaderboard 🏆`
+          );
+        } catch (e) {}
+        return;
+      }
+
       await reply(msg, `❌ No encontré la propuesta \`${trimmedId}\``);
       return;
     }
@@ -705,12 +654,22 @@ client.on('message', async msg => {
         return;
       }
 
+      // Check pending reminders
+      const pendingReminder = storage.getPendingReminders().find(p => p.id === id.trim());
+      if (pendingReminder) {
+        storage.deletePendingReminder(pendingReminder.id);
+        await reply(msg, `🗑️ Sugerencia de recordatorio *"${pendingReminder.title}"* rechazada.`);
+        try {
+          await client.sendMessage(`${pendingReminder.suggestedBy}@c.us`,
+            `❌ Tu sugerencia de recordatorio *"${pendingReminder.title}"* fue rechazada.\n📝 Motivo: ${motivo}`
+          );
+        } catch (e) {}
+        return;
+      }
+
       await reply(msg, `❌ No encontré la propuesta \`${id}\``);
       return;
     }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // !borrar-tarea [id] (ADMIN)
     // ══════════════════════════════════════════════════════════════════════════
     if (cmd === 'borrar-tarea') {
       if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
@@ -782,7 +741,7 @@ client.on('message', async msg => {
     // !proponer-apuntes  (cualquiera)
     // Formato: materia | título | descripción | link (opcional)
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'proponer-apuntes') {
+    if (cmd === 'proponer-apuntes' || cmd === 'p-a') {
       if (!args) {
         const subjectList = (config.subjects || []).map(s => `• ${s.name}`).join('\n');
         const subjectHint = subjectList ? `\n\n📚 *Materias disponibles:*\n${subjectList}` : '';
@@ -883,6 +842,10 @@ client.on('message', async msg => {
       if (parts.length < 3) { await reply(msg, '❌ Faltan campos: `keywords | pregunta | respuesta`'); return; }
       const [kwStr, question, answer] = parts;
       const keywords = kwStr.split(',').map(k => k.trim()).filter(Boolean);
+      if (keywords.length < 2) {
+        await reply(msg, '❌ Se requieren al menos *2 keywords* para que la FAQ se active por cualquiera de ellas.\n\nEjemplo:\n`!add-faq algoritmos,quiz | ¿Hay quiz de algoritmos? | Sí, cada semana.`');
+        return;
+      }
       const saved = storage.saveFaq({ keywords, question, answer, addedBy: number });
       await reply(msg, `✅ *FAQ agregada*\n\n❓ ${question}\n💬 ${answer}\n🔑 Keywords: ${keywords.join(', ')}\n🆔 \`${saved.id}\``);
       return;
@@ -930,7 +893,7 @@ client.on('message', async msg => {
           `🏆 Premio: *${prize.prize}*\n` +
           `🎯 Meta: *${prize.points} puntos*\n` +
           `🤝 Patrocinado por: *${prize.sponsor}*\n\n` +
-          `_¡Acumula puntos proponiendo tareas/recordatorios y respondiendo preguntas (anónimas)!_`
+          `_¡Acumula puntos proponiendo tareas/recordatorios/apuntes y respondiendo preguntas anónimas!_`
         );
       }
       return;
@@ -1153,10 +1116,10 @@ client.on('message', async msg => {
     const chat = await msg.getChat();
     if (!chat.isGroup || body.startsWith(config.prefix)) return;
 
-    // const faq = storage.matchFaq(body);
-    // if (faq) {
-    //   await msg.reply(`❓ *${faq.question}*\n\n${faq.answer}\n\n_Respuesta automática. Usa \`!faq\` para ver todas las preguntas frecuentes._`);
-    // }
+    const faq = storage.matchFaq(body);
+    if (faq) {
+      await msg.reply(`❓ *${faq.question}*\n\n${faq.answer}\n\n_Respuesta automática. Usa \`!faq\` para ver todas las preguntas frecuentes._`);
+    }
   } catch (e) {
     // Ignorar errores del auto-responder
   }

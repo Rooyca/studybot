@@ -189,7 +189,7 @@ function incrementStat(number, name, metric, amount = 1) {
   s.totalPoints =
     (s.tasksApproved     * 7) +
     (s.tasksProposed     * 3) +
-    (s.notesApproved     * 6) +
+    (s.notesApproved     * 5) +
     (s.notesProposed     * 2) +
     (s.questionsAnswered * 2) +
     (s.questionsAsked    * 1) +
