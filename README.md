@@ -1,16 +1,16 @@
 # StudyBot 🤖📚
 
-WhatsApp bot for study groups with deadline reminders, homework tracking, notes sharing, anonymous questions, moderation, FAQ, and leaderboard. Built with [whatsapp-web.js](https://github.com/pedroslopez/whatsapp-web.js).
+Bot de WhatsApp para grupos de estudio con recordatorios de entregas, seguimiento de tareas, compartir apuntes, preguntas anónimas, moderación, FAQ y leaderboard. Construido con [whatsapp-web.js](https://github.com/pedroslopez/whatsapp-web.js).
 
-> Bot interface and commands are in Spanish. See [README.es.md](README.es.md) for the Spanish version.
+> La interfaz y los comandos del bot están en español. Ver [README.md](README.md) para la versión en inglés.
 
-## Requirements
+## Requisitos
 
 - [Node.js](https://nodejs.org/) v16+
-- A dedicated WhatsApp account (QR scan required on first run)
-- Bot must be a **group admin** to delete messages and remove inactive members
+- Una cuenta de WhatsApp dedicada (se requiere escanear el QR en el primer inicio)
+- El bot debe ser **administrador del grupo** para poder eliminar mensajes y remover miembros inactivos
 
-## Setup
+## Instalación
 
 ```bash
 git clone https://github.com/your-user/bot_unip.git
@@ -19,101 +19,121 @@ npm install
 cp -r data_example data
 ```
 
-Edit `config.json` with your admin numbers, group ID, and preferences. To get the group ID, send any message and check the console — it logs the chat ID on each received message.
+Editá `config.json` con tus números de admin, el ID del grupo y las preferencias. Para obtener el ID del grupo, enviá cualquier mensaje y revisá la consola — loguea el chat ID en cada mensaje recibido.
 
-## Run
+## Ejecución
 
 ```bash
-npm start        # production
-npm run dev      # development (auto-restart)
+npm start        # producción
+npm run dev      # desarrollo (reinicio automático)
 ```
 
-On first run, scan the QR code printed in the terminal. The session is saved in `.wwebjs_auth/` for subsequent runs.
+En el primer inicio, escaneá el código QR que aparece en la terminal. La sesión se guarda en `.wwebjs_auth/` para los siguientes inicios.
 
-## Configuration
+## Configuración
 
-All settings live in `config.json`. See `config.json.example` for the full structure. Key sections:
+Toda la configuración vive en `config.json`. Ver `config.json.example` para la estructura completa. Secciones principales:
 
-| Key | Description |
+| Clave | Descripción |
 |---|---|
-| `admins` | Array of admin phone numbers (no `+`, e.g. `"573111111111"`) |
-| `groupId` | WhatsApp group ID (e.g. `"12345@g.us"`) |
-| `subjects` | List of subjects with aliases and Drive folder links (see below) |
-| `reminderDays` | Days before deadline to send reminders (e.g. `[4, 2, 0]`) |
-| `weeklySummary` | Weekly digest config (day, hour, message template) |
-| `wordWarnings` | Auto-warn on forbidden words |
-| `mute` | Mute durations and message templates |
-| `welcome` | Welcome message for new members |
-| `activityCheck` | Inactivity warning and removal thresholds |
+| `admins` | Array de números de admin (sin `+`, ej: `"573111111111"`) |
+| `groupId` | ID del grupo de WhatsApp (ej: `"12345@g.us"`) |
+| `prefix` | Carácter de prefijo para comandos (por defecto `"!"`) |
+| `subjects` | Lista de materias con alias y links de Drive (ver abajo) |
+| `reminderDays` | Días antes del vencimiento para enviar recordatorios (ej: `[4, 2, 0]`) |
+| `weeklySummary` | Configuración del resumen semanal (día, hora, plantilla de mensaje) |
+| `messages` | Plantillas de notificación de recordatorios (4 días, 2 días, hoy) |
+| `wordWarnings` | Auto-advertencia por palabras prohibidas |
+| `mute` | Duraciones de silencio y plantillas de mensajes |
+| `welcome` | Mensaje de bienvenida para nuevos miembros |
+| `anonymous` | Configuración de preguntas anónimas (habilitado, plantillas de mensajes) |
+| `activityCheck` | Umbrales de advertencia y remoción por inactividad |
 
-### Subjects (`config.subjects`)
+### Materias (`config.subjects`)
 
-Configure the subjects for the current semester so users can propose homeworks or notes without needing to paste a Drive link manually. The bot normalizes subject name variants (aliases) and auto-fills the Drive folder link.
+Configurá las materias del cuatrimestre para que los usuarios puedan proponer tareas o apuntes sin necesidad de pegar un link de Drive manualmente. El bot normaliza variantes del nombre de la materia (alias) y autocompleta el link de Drive.
 
 ```json
 "subjects": [
   {
     "name": "Algoritmos I",
     "aliases": ["algoritmos 1", "algo 1", "algoritmos i"],
-    "driveFolder": "https://drive.google.com/drive/folders/YOUR_FOLDER_ID",
-    "notesFolder": "https://drive.google.com/drive/folders/YOUR_FOLDER_ID_TWO"
+    "driveFolder": "https://drive.google.com/drive/folders/ID_DE_TU_CARPETA",
+    "notesFolder": "https://drive.google.com/drive/folders/ID_DE_TU_CARPETA_APUNTES"
   }
 ]
 ```
 
-- `name` — canonical display name used in all messages
-- `aliases` — alternative spellings accepted from users (case-insensitive)
-- `driveFolder` — Google Drive folder URL auto-filled when a user doesn't provide a link
+- `name` — nombre canónico que aparece en todos los mensajes
+- `aliases` — variantes aceptadas (sin distinguir mayúsculas/minúsculas)
+- `driveFolder` — URL de Google Drive que se autocompleta cuando un usuario propone una tarea
+- `notesFolder` — URL de Google Drive que se autocompleta cuando un usuario propone apuntes
 
-## Commands
+## Comandos
 
-### Public
+> **Tip:** Los comandos toleran un espacio después del prefijo — `! tareas` funciona igual que `!tareas`. La mayoría también tienen alias cortos indicados junto al nombre completo.
 
-| Command | Description |
+### Públicos
+
+| Comando | Descripción |
 |---|---|
-| `!ayuda` | Show available commands |
-| `!admins` | List group admins |
-| `!recordatorios` | View upcoming deadlines |
-| `!proponer-recordatorio "Title" YYYY-MM-DD [desc]` | Propose a reminder for admin review |
-| `!tareas` | View all approved homeworks with numeric IDs |
-| `!ver-tarea [n]` | View full details of homework number N |
-| `!buscar-tarea [query]` | Search homeworks by subject, title, or description |
-| `!proponer-tarea subject \| title \| desc \| link` | Propose a homework (link optional if subject is configured) |
-| `!apuntes` | View all approved notes with numeric IDs |
-| `!ver-apuntes [n]` | View full details of notes entry number N |
-| `!buscar-apuntes [query]` | Search notes by subject, title, or description |
-| `!proponer-apuntes subject \| title \| desc \| link` | Share notes for admin review |
-| `!pregunta [text]` | Send anonymous question to the group *(DM only)* |
-| *(reply to a question message)* | Answer an anonymous question and earn points |
-| `!preguntas` | View recent anonymous questions and their answers |
-| `!faq` | View frequently asked questions |
-| `!tabla` | Group leaderboard |
-| `!puntos` | Your personal score and stats |
-| `!premio` | Current leaderboard prize |
+| `!ayuda` | Mostrar los comandos disponibles |
+| `!admins` | Listar los administradores del grupo |
+| `!recordatorios` / `!r` | Ver próximas fechas de entrega |
+| `!proponer-recordatorio` / `!p-r` `"Título" YYYY-MM-DD [desc]` | Proponer un recordatorio para revisión de un admin |
+| `!tareas` / `!t` | Ver todas las tareas aprobadas con IDs numéricos |
+| `!ver-tarea` / `!vt` `[n]` | Ver el detalle completo de la tarea número N |
+| `!buscar-tarea` / `!bt` `[consulta]` | Buscar tareas por materia, título o descripción |
+| `!proponer-tarea` / `!pt` `materia \| título \| desc \| link` | Proponer una tarea (link opcional si la materia está configurada) |
+| `!apuntes` / `!a` | Ver todos los apuntes aprobados con IDs numéricos |
+| `!ver-apuntes` / `!va` `[n]` | Ver el detalle completo del apunte número N |
+| `!buscar-apuntes` / `!ba` `[consulta]` | Buscar apuntes por materia, título o descripción |
+| `!proponer-apuntes` / `!pa` `materia \| título \| desc \| link` | Compartir apuntes para revisión de un admin |
+| `!pregunta [texto]` | Enviar una pregunta anónima al grupo *(solo desde privado)* |
+| *(responder citando el mensaje de la pregunta)* | Responder una pregunta anónima y ganar puntos |
+| `!preguntas` | Ver preguntas anónimas recientes con sus respuestas |
+| `!faq` | Ver preguntas frecuentes |
+| `!tabla` | Leaderboard del grupo |
+| `!puntos` | Tu puntaje personal y estadísticas |
+| `!premio` | Ver el premio actual del leaderboard |
 
 ### Admin
 
-| Command | Description |
+| Comando | Descripción |
 |---|---|
-| `!recordatorio "Title" YYYY-MM-DD [desc]` | Add a reminder directly (no review needed) |
-| `!borrar-recordatorio [id]` | Delete a reminder |
-| `!pendientes` | View **all** pending proposals — homeworks, notes, and reminders — in one place |
-| `!aprobar [id]` | Approve any pending proposal (homework, notes, or reminder) |
-| `!rechazar [id] [reason]` | Reject any pending proposal with an optional reason |
-| `!borrar-tarea [id]` | Delete an approved homework |
-| `!borrar-apuntes [id]` | Delete approved notes |
-| `!add-faq keyword1,keyword2 \| Question \| Answer` | Add an FAQ entry |
-| `!del-faq [id]` | Delete an FAQ entry |
-| `!conf-premio Prize \| Points \| Sponsor` | Set the leaderboard prize |
-| `!mutear [@user] [minutes] [reason]` | Mute a user |
-| `!desmutear [@user]` | Unmute a user |
-| `!muteados` | List currently muted users |
-| `!inactivos` | List members inactive for ≥30 days |
-| `!todos [message]` | Send a private DM to every non-admin group member |
-| `!resumen-semanal` | Force the weekly digest |
-| `!test-recordatorios` | Force reminder check |
-| `!test-actividad` | Force inactivity check |
+| `!recordatorio "Título" YYYY-MM-DD [desc]` | Agregar un recordatorio directamente (sin revisión) |
+| `!borrar-recordatorio [id]` | Eliminar un recordatorio |
+| `!pendientes` | Ver **todas** las propuestas pendientes — tareas, apuntes y recordatorios — en un solo lugar |
+| `!aprobar [id]` | Aprobar cualquier propuesta pendiente (tarea, apuntes o recordatorio) |
+| `!rechazar [id] [motivo]` | Rechazar cualquier propuesta con un motivo opcional |
+| `!borrar-tarea [id]` | Eliminar una tarea aprobada |
+| `!borrar-apuntes [id]` | Eliminar apuntes aprobados |
+| `!add-faq keyword1,keyword2 \| Pregunta \| Respuesta` | Agregar una entrada de FAQ |
+| `!del-faq [id]` | Eliminar una entrada de FAQ |
+| `!conf-premio Premio \| Puntos \| Patrocinador` | Configurar el premio del leaderboard |
+| `!mutear [@usuario] [minutos] [motivo]` | Silenciar un usuario |
+| `!desmutear [@usuario]` | Desilenciar un usuario |
+| `!muteados` | Ver usuarios actualmente silenciados |
+| `!inactivos` | Listar miembros inactivos hace ≥30 días |
+| `!all [mensaje]` | Enviar un mensaje privado a todos los miembros no-admin del grupo |
+| `!resumen-semanal` | Forzar el resumen semanal |
+| `!test-recordatorios` | Forzar la revisión de recordatorios |
+| `!test-actividad` | Forzar la revisión de inactividad |
 
-## License
+## Comportamientos automáticos
+
+| Comportamiento | Disparador |
+|---|---|
+| **Mensaje de bienvenida** | Se envía al grupo cuando se une un nuevo miembro |
+| **Notificaciones de recordatorio** | Se envían al grupo a las 8:00 AM (Bogotá) en los días configurados antes de un vencimiento |
+| **Resumen semanal** | Se envía el día/hora configurados con todas las entregas de los próximos 7 días |
+| **Advertencias de palabras** | El bot advierte en el grupo si detecta una palabra prohibida |
+| **Aplicación del silencio** | Los mensajes de usuarios silenciados son eliminados y reciben un aviso por privado |
+| **Revisión de inactividad** | Se ejecuta diariamente a las 10:00 AM (Bogotá); advierte tras `warnAfterDays` días y remueve tras `removeAfterDays` días adicionales |
+| **Auto-respuesta de FAQ** | Cuando un mensaje del grupo contiene una palabra clave que coincide con una entrada de FAQ, el bot responde automáticamente |
+| **FAQ desde recordatorios** | Al agregar un recordatorio con `!recordatorio`, se crea automáticamente una entrada de FAQ con palabras clave extraídas del título y descripción. Al borrar el recordatorio, también se eliminan sus FAQs. |
+| **Puntos por responder preguntas** | Responder (citando) el mensaje de una pregunta anónima en el grupo otorga +3 puntos |
+
+## Licencia
 
 [MIT](LICENSE)

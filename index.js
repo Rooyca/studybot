@@ -308,7 +308,7 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     // !recordatorios
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'recordatorios') {
+    if (cmd === 'recordatorios' || cmd === 'r') {
       const list = storage.getActiveReminders()
         .sort((a, b) => new Date(a.date) - new Date(b.date));
       if (!list.length) { await reply(msg, '📭 No hay recordatorios pendientes.'); return; }
@@ -325,7 +325,7 @@ client.on('message', async msg => {
     // !proponer-recordatorio  (cualquiera)
     // Formato: !proponer-recordatorio "Título" YYYY-MM-DD descripción opcional
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'proponer-recordatorio' || cmd === 'p-r') {
+    if (cmd === 'proponer-recordatorio' || cmd === 'pr') {
       if (!args) {
         await reply(msg, '📌 Uso: `!proponer-recordatorio "Título" YYYY-MM-DD descripción opcional`\n\nEjemplo:\n`!proponer-recordatorio "Entrega TP3" 2025-12-20 Subir al campus antes de las 23:59`');
         return;
@@ -405,7 +405,7 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     // !tareas
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'tareas') {
+    if (cmd === 'tareas' || cmd === 't') {
       const list = storage.getHomework();
       if (!list.length) { await reply(msg, '📭 No hay tareas guardadas aún.'); return; }
       const lines = list.map((hw, i) =>
@@ -418,7 +418,7 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     // !ver-tarea [n]
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'ver-tarea' || cmd === 'v-t' || cmd === ' ver-tarea') {
+    if (cmd === 'ver-tarea' || cmd === 'vt') {
       if (!args) { await reply(msg, '🔍 Uso: `!ver-tarea [número]`\n\nEjemplo: `!ver-tarea 3`\n\nUsa `!tareas` para ver la lista con números.'); return; }
       const list = storage.getHomework();
       const n = parseInt(args.trim(), 10);
@@ -436,7 +436,7 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     // !buscar-tarea [consulta]
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'buscar-tarea' || cmd === 'b-t') {
+    if (cmd === 'buscar-tarea' || cmd === 'bt') {
       if (!args) { await reply(msg, '🔍 Uso: `!buscar-tarea [consulta]`\n\nEjemplo: `!buscar-tarea algoritmos`\n\nBusca por materia, título o descripción.'); return; }
       const allHomework = storage.getHomework();
       const query = args.trim().toLowerCase();
@@ -460,7 +460,7 @@ client.on('message', async msg => {
     // !proponer-tarea  (cualquiera)
     // Formato: materia | título | descripción | link
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'proponer-tarea' || cmd === 'p-t') {
+    if (cmd === 'proponer-tarea' || cmd === 'pt') {
       if (!args) {
         const subjectList = (config.subjects || []).map(s => `• ${s.name}`).join('\n');
         const subjectHint = subjectList ? `\n\n📚 *Materias disponibles:*\n${subjectList}` : '';
@@ -692,7 +692,7 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     // !apuntes
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'apuntes') {
+    if (cmd === 'apuntes' || cmd === 'a') {
       const list = storage.getNotes();
       if (!list.length) { await reply(msg, '📭 No hay apuntes guardados aún.'); return; }
       const lines = list.map((n, i) =>
@@ -705,7 +705,7 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     // !ver-apuntes [n]
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'ver-apuntes' || cmd === 'v-a') {
+    if (cmd === 'ver-apuntes' || cmd === 'va') {
       if (!args) { await reply(msg, '🔍 Uso: `!ver-apuntes [número]`\n\nEjemplo: `!ver-apuntes 2`\n\nUsa `!apuntes` para ver la lista con números.'); return; }
       const list = storage.getNotes();
       const n = parseInt(args.trim(), 10);
@@ -723,7 +723,7 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     // !buscar-apuntes [consulta]
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'buscar-apuntes' || cmd === 'b-a') {
+    if (cmd === 'buscar-apuntes' || cmd === 'ba') {
       if (!args) { await reply(msg, '🔍 Uso: `!buscar-apuntes [consulta]`\n\nEjemplo: `!buscar-apuntes cálculo`\n\nBusca por materia, título o descripción.'); return; }
       const allNotes = storage.getNotes();
       const query = args.trim().toLowerCase();
@@ -747,7 +747,7 @@ client.on('message', async msg => {
     // !proponer-apuntes  (cualquiera)
     // Formato: materia | título | descripción | link (opcional)
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'proponer-apuntes' || cmd === 'p-a') {
+    if (cmd === 'proponer-apuntes' || cmd === 'pa') {
       if (!args) {
         const subjectList = (config.subjects || []).map(s => `• ${s.name}`).join('\n');
         const subjectHint = subjectList ? `\n\n📚 *Materias disponibles:*\n${subjectList}` : '';
@@ -875,7 +875,7 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     // !tabla — Leaderboard
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'tabla' || cmd === ' tabla') {
+    if (cmd === 'tabla') {
       await reply(msg, buildLeaderboard());
       return;
     }
@@ -1077,7 +1077,7 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     // !todos [mensaje] (ADMIN) — Enviar mensaje privado a todos los miembros
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'all') {
+    if (cmd === 'todos') {
       if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
       if (!args) { await reply(msg, '❌ Uso: `!todos [mensaje]`\n\nEjemplo: `!todos Recuerden entregar el TP antes del viernes.`'); return; }
       if (!isGroup) { await reply(msg, '⚠️ Este comando solo funciona desde el grupo.'); return; }
