@@ -10,6 +10,8 @@ const FILES = {
   pending:          path.join(__dirname, '../data/pending.json'),
   notes:            path.join(__dirname, '../data/notes.json'),
   pendingNotes:     path.join(__dirname, '../data/pending-notes.json'),
+  resources:        path.join(__dirname, '../data/resources.json'),
+  pendingResources: path.join(__dirname, '../data/pending-resources.json'),
   faqs:             path.join(__dirname, '../data/faqs.json'),
   stats:            path.join(__dirname, '../data/stats.json'),
   muted:            path.join(__dirname, '../data/muted.json'),
@@ -97,6 +99,38 @@ function savePending(data) {
   const entry = { id: genId(), ...data, proposedAt: new Date().toISOString(), status: 'pending' };
   list.push(entry);
   write('pending', list);
+  return entry;
+}
+
+// ─── Resources (recursos aprobados) ──────────────────────────────────────────
+
+const getResources    = ()       => read('resources');
+const deleteResource  = (id)     => write('resources', getResources().filter(r => r.id !== id));
+const searchResources = (query)  => {
+  const q = query.toLowerCase();
+  return getResources().filter(r =>
+    r.type.toLowerCase().includes(q) ||
+    r.title.toLowerCase().includes(q) ||
+    (r.description || '').toLowerCase().includes(q)
+  );
+};
+function saveResource(data) {
+  const list = getResources();
+  const entry = { id: genId(), ...data, savedAt: new Date().toISOString() };
+  list.push(entry);
+  write('resources', list);
+  return entry;
+}
+
+// ─── Pending resources (recursos propuestos esperando aprobación) ─────────────
+
+const getPendingResources    = ()    => read('pendingResources');
+const deletePendingResource  = (id)  => write('pendingResources', getPendingResources().filter(p => p.id !== id));
+function savePendingResource(data) {
+  const list = getPendingResources();
+  const entry = { id: genId(), ...data, proposedAt: new Date().toISOString(), status: 'pending' };
+  list.push(entry);
+  write('pendingResources', list);
   return entry;
 }
 
@@ -210,10 +244,12 @@ const deleteFaqsByReminderId = (reminderId) =>
   write('faqs', getFaqs().filter(f => f.reminderId !== reminderId));
 
 function matchFaq(text) {
+  if (!text.includes('?')) return null;
   const lower = text.toLowerCase();
-  return getActiveFaqs().find(f =>
-    (f.keywords || []).some(k => lower.includes(k.toLowerCase()))
-  );
+  return getActiveFaqs().find(f => {
+    const matched = (f.keywords || []).filter(k => lower.includes(k.toLowerCase()));
+    return matched.length >= 2;
+  });
 }
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
@@ -236,6 +272,8 @@ function incrementStat(number, name, metric, amount = 1) {
       tasksApproved: 0,
       notesProposed: 0,
       notesApproved: 0,
+      resourcesProposed: 0,
+      resourcesApproved: 0,
       questionsAnswered: 0,
       questionsAsked: 0,
       remindersApproved: 0,
@@ -246,17 +284,23 @@ function incrementStat(number, name, metric, amount = 1) {
   if (!stats[number].remindersApproved) stats[number].remindersApproved = 0;
   if (!stats[number].notesProposed) stats[number].notesProposed = 0;
   if (!stats[number].notesApproved) stats[number].notesApproved = 0;
+  if (!stats[number].resourcesProposed) stats[number].resourcesProposed = 0;
+  if (!stats[number].resourcesApproved) stats[number].resourcesApproved = 0;
   stats[number][metric] = (stats[number][metric] || 0) + amount;
 
   // Recalcular puntos:
-  // Tarea/apunte aprobado = 7 pts (+3 de propuesta = 10 total), Propuesta = 3 pts,
-  // Respuesta = 3 pts, Pregunta = 1 pt, Recordatorio aprobado = 1 pt
+  // Tarea aprobada = 7 pts, Propuesta = 3 pts,
+  // Apunte aprobado = 5 pts, Propuesto = 2 pts,
+  // Recurso aprobado = 4 pts, Propuesto = 2 pts,
+  // Respuesta = 2 pts, Pregunta = 1 pt, Recordatorio aprobado = 1 pt
   const s = stats[number];
   s.totalPoints =
     (s.tasksApproved     * 7) +
     (s.tasksProposed     * 3) +
     (s.notesApproved     * 5) +
     (s.notesProposed     * 2) +
+    (s.resourcesApproved * 2) +
+    (s.resourcesProposed * 1) +
     (s.questionsAnswered * 2) +
     (s.questionsAsked    * 1) +
     (s.remindersApproved * 1);
@@ -398,6 +442,10 @@ module.exports = {
   getNotes, saveNote, deleteNote, searchNotes,
   // pending notes
   getPendingNotes, savePendingNote, deletePendingNote,
+  // resources
+  getResources, saveResource, deleteResource, searchResources,
+  // pending resources
+  getPendingResources, savePendingResource, deletePendingResource,
   // faq
   getFaqs, getActiveFaqs, saveFaq, saveFaqForReminder, deleteFaq, deleteFaqsByReminderId, matchFaq,
   // stats

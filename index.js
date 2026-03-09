@@ -12,6 +12,10 @@
 //   !ver-apuntes [n]            — Ver detalle de un apunte por su número
 //   !buscar-apuntes [consulta]  — Buscar apuntes por materia, título o descripción
 //   !proponer-apuntes           — Proponer apuntes para revisión
+//   !recursos                   — Ver recursos del semestre (con ID numérico)
+//   !ver-recurso [n]            — Ver detalle de un recurso por su número
+//   !buscar-recurso [consulta]  — Buscar recursos por tipo, título o descripción
+//   !proponer-recurso           — Proponer un recurso para revisión
 //   !pregunta [texto]           — Enviar pregunta anónima al grupo (desde privado)
 //   !faq                        — Ver preguntas frecuentes
 //   !tabla                      — Ver leaderboard
@@ -23,11 +27,12 @@
 // COMANDOS ADMIN:
 //   !recordatorio "T" YYYY-MM-DD [desc]   — Agregar recordatorio
 //   !borrar-recordatorio [id]             — Borrar recordatorio
-//   !pendientes                           — Ver todas las propuestas esperando revisión (tareas, apuntes, recordatorios)
-//   !aprobar [id]                         — Aprobar tarea, apuntes o recordatorio propuesto
-//   !rechazar [id] [motivo]               — Rechazar tarea, apuntes o recordatorio propuesto
+//   !pendientes                           — Ver todas las propuestas esperando revisión (tareas, apuntes, recursos, recordatorios)
+//   !aprobar [id]                         — Aprobar tarea, apuntes, recurso o recordatorio propuesto
+//   !rechazar [id] [motivo]               — Rechazar tarea, apuntes, recurso o recordatorio propuesto
 //   !borrar-tarea [id]                    — Borrar tarea aprobada
 //   !borrar-apuntes [id]                  — Borrar apuntes aprobados
+//   !borrar-recurso [id]                  — Borrar recurso aprobado
 //   !add-faq [keyword1,keyword2] | [q] | [a]  — Agregar FAQ
 //   !del-faq [id]                         — Borrar FAQ
 //   !conf-premio premio | puntos | patrocinador  — Configurar premio del leaderboard
@@ -144,48 +149,55 @@ function extractTarget(args, mentionedIds) {
 // ─── Textos de ayuda ──────────────────────────────────────────────────────────
 
 const HELP_PUBLIC = `
-📚 *===== COMANDOS =====*
+📚 *COMANDOS* 📚
 
 📅 *Recordatorios*
-• \`!recordatorios\` — Ver entregas próximas
-• \`!proponer-recordatorio "Título" YYYY-MM-DD [desc]\` — Proponer un recordatorio
+• \`!recordatorios\` / \`!r\` — Ver recordatorios
+• \`!proponer-recordatorio / !pr "Título" YYYY-MM-DD [desc]\` — Proponer un recordatorio
 
 📂 *Tareas resueltas*
-• \`!tareas\` — Ver todas las tareas resueltas
-• \`!ver-tarea [n]\` — Ver detalle de una tarea por su número
-• \`!buscar-tarea [consulta]\` — Buscar tareas por materia, título o descripción
-• \`!proponer-tarea materia | título | desc | link\` — Proponer una tarea para que la revise un admin
+• \`!tareas / !t\` — Ver tareas resueltas
+• \`!ver-tarea / !vt [n]\` — Ver detalles de una tarea por número
+• \`!buscar-tarea / !bt [consulta]\` — Buscar tareas
+• \`!proponer-tarea / !pt materia | título | desc | link / !pt \` — Proponer una tarea para que la revisen
 
 📝 *Apuntes*
-• \`!apuntes\` — Ver todos los apuntes disponibles
-• \`!ver-apuntes [n]\` — Ver detalle de un apunte por su número
-• \`!buscar-apuntes [consulta]\` — Buscar apuntes por materia, título o descripción
-• \`!proponer-apuntes materia | título | desc | link\` — Compartir tus apuntes para que un admin los apruebe
+• \`!apuntes / !a\` — Ver apuntes disponibles
+• \`!ver-apuntes / !va [n]\` — Ver detalle de un apunte por número
+• \`!buscar-apuntes / !ba [consulta]\` — Buscar apuntes 
+• \`!proponer-apuntes / !pa materia | título | desc | link\` — Compartir tus apuntes 
+
+📦 *Recursos del semestre*
+• \`!recursos / !rc\` — Ver recursos disponibles
+• \`!ver-recurso / !vrc [n]\` — Ver detalle de un recurso por número
+• \`!buscar-recurso / !brc [consulta]\` — Buscar recursos
+• \`!proponer-recurso / !prc tipo | título | desc | link\` — Compartir un recurso útil
 
 ❓ *Preguntas*
-• \`!pregunta [texto]\` — Enviar pregunta anónima al grupo _(solo desde privado)_
+• \`!pregunta [texto]\` — Enviar pregunta anónima al grupo _(desde los mensajes privados del bot)_
 • _Responde citando el mensaje de la pregunta para ganar puntos_
 • \`!preguntas\` — Ver preguntas recientes con sus respuestas
 
 🏆 *Estadísticas*
-• \`!tabla\` — Leaderboard del grupo
+• \`!tabla\` — Tabla de puntos del grupo
 • \`!puntos\` — Tu puntaje personal
-• \`!premio\` — Ver el premio actual del leaderboard
+• \`!premio\` — Ver el premio actual
 `.trim();
 
 const HELP_ADMIN = `
 👮 *Comandos de Admin*
 
 📌 *Recordatorios*
-\`!recordatorio "Título" YYYY-MM-DD [desc]\` — Agregar directo
+\`!recordatorio "Título" YYYY-MM-DD [desc]\`
 \`!borrar-recordatorio [id]\`
 
-📋 *Propuestas (tareas, apuntes y recordatorios)*
+📋 *Propuestas (tareas, apuntes, recursos y recordatorios)*
 \`!pendientes\` — Ver todas las propuestas esperando aprobación
 \`!aprobar [id]\` — Aprobar cualquier propuesta
 \`!rechazar [id] [motivo]\` — Rechazar cualquier propuesta
 \`!borrar-tarea [id]\`
 \`!borrar-apuntes [id]\`
+\`!borrar-recurso [id]\`
 
 ❓ *FAQ*
 \`!add-faq keyword1,keyword2 | Pregunta | Respuesta\`
@@ -255,7 +267,7 @@ client.on('message', async msg => {
               `🎉 *¡Respuesta aceptada!*\n\n` +
               `📌 Pregunta: _"${result.question}"_\n` +
               `💬 Tu respuesta quedó guardada y vinculada.\n\n` +
-              `⭐ *+3 puntos* en el leaderboard. ¡Gracias por ayudar!`
+              `⭐ *+2 puntos* en el leaderboard. ¡Gracias por ayudar!`
             );
             break;
 
@@ -289,7 +301,7 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     // !ayuda
     // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'ayuda') {
+    if (cmd === 'ayuda' || cmd === 'help') {
       const text = isAdmin(number)
         ? HELP_PUBLIC + '\n\n' + HELP_ADMIN
         : HELP_PUBLIC;
@@ -314,7 +326,7 @@ client.on('message', async msg => {
       if (!list.length) { await reply(msg, '📭 No hay recordatorios pendientes.'); return; }
       const lines = list.map(r => {
         const diff = daysDiff(r.date);
-        const when = diff === 0 ? '🚨 HOY' : diff === 1 ? '⚠️ Mañana' : diff <= 3 ? `⏰ ${diff} días` : `▶ ${diff} días`;
+        const when = diff === 0 ? '🚨 HOY' : diff === 1 ? '⚠️ Mañana' : diff <= 3 ? `⏰ ${diff} días` : `• ${diff} días`;
         return `${when} — *${r.title}*\n   📅 ${formatDate(r.date)}\n   📝 ${r.description || '—'}`;
       });
       await reply(msg, `📋 *Recordatorios (${list.length}):*\n\n${lines.join('\n\n')}`);
@@ -499,8 +511,9 @@ client.on('message', async msg => {
       if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
       const tasks = storage.getPending();
       const notes = storage.getPendingNotes();
+      const resources = storage.getPendingResources();
       const reminders = storage.getPendingReminders();
-      if (!tasks.length && !notes.length && !reminders.length) { await reply(msg, '✅ No hay propuestas pendientes de revisión.'); return; }
+      if (!tasks.length && !notes.length && !resources.length && !reminders.length) { await reply(msg, '✅ No hay propuestas pendientes de revisión.'); return; }
       const parts = [];
       if (reminders.length) {
         const reminderLines = reminders.map(p => {
@@ -521,7 +534,13 @@ client.on('message', async msg => {
         );
         parts.push(`📝 *Apuntes (${notes.length}):*\n\n${noteLines.join('\n\n')}`);
       }
-      const total = tasks.length + notes.length + reminders.length;
+      if (resources.length) {
+        const resourceLines = resources.map(p =>
+          `📦 *[RECURSO]* [${p.type}] ${p.title}\n   📝 ${p.description || '—'}\n   🔗 ${p.link || '—'}\n   👤 ${p.proposedByName || p.proposedBy}\n   🆔 \`${p.id}\``
+        );
+        parts.push(`📦 *Recursos (${resources.length}):*\n\n${resourceLines.join('\n\n')}`);
+      }
+      const total = tasks.length + notes.length + resources.length + reminders.length;
       await reply(msg, `📥 *Propuestas pendientes (${total}):*\n\n${parts.join('\n\n')}\n\nAprueba: \`!aprobar [id]\`\nRechaza: \`!rechazar [id] [motivo]\``);
       return;
     }
@@ -584,7 +603,35 @@ client.on('message', async msg => {
 
         try {
           await client.sendMessage(`${pendingNote.proposedBy}@c.us`,
-            `🎉 ¡Tus apuntes *"${pendingNote.title}"* fueron aprobados y ya están disponibles en el grupo!\n\n+7 puntos en el leaderboard 🏆`
+            `🎉 ¡Tus apuntes *"${pendingNote.title}"* fueron aprobados y ya están disponibles en el grupo!\n\n+5 puntos en el leaderboard 🏆`
+          );
+        } catch (e) {}
+        return;
+      }
+
+      // Check pending resources
+      const pendingResource = storage.getPendingResources().find(p => p.id === trimmedId);
+      if (pendingResource) {
+        storage.saveResource({
+          type: pendingResource.type, title: pendingResource.title,
+          description: pendingResource.description, link: pendingResource.link,
+          proposedBy: pendingResource.proposedByName || pendingResource.proposedBy,
+          approvedBy: name,
+        });
+        storage.deletePendingResource(pendingResource.id);
+        storage.incrementStat(pendingResource.proposedBy, pendingResource.proposedByName, 'resourcesApproved');
+
+        await reply(msg, `✅ Recurso *"${pendingResource.title}"* aprobado y publicado.`);
+
+        try {
+          await client.sendMessage(config.groupId,
+            `📦 *Nuevo recurso disponible*\n\n🏷️ [${pendingResource.type}] ${pendingResource.title}\n📝 ${pendingResource.description || '—'}\n🔗 ${pendingResource.link || '—'}\n\n¡Gracias @${pendingResource.proposedBy} por compartir! 🙌`
+          );
+        } catch (e) {}
+
+        try {
+          await client.sendMessage(`${pendingResource.proposedBy}@c.us`,
+            `🎉 ¡Tu recurso *"${pendingResource.title}"* fue aprobado y ya está disponible en el grupo!\n\n+2 puntos en el leaderboard 🏆`
           );
         } catch (e) {}
         return;
@@ -655,6 +702,19 @@ client.on('message', async msg => {
         try {
           await client.sendMessage(`${pendingNote.proposedBy}@c.us`,
             `❌ Tu propuesta de apuntes *"${pendingNote.title}"* fue rechazada.\n\n📝 Motivo: ${motivo}\n\nSi tienes dudas, contacta a un admin.`
+          );
+        } catch (e) {}
+        return;
+      }
+
+      // Check pending resources
+      const pendingResource = storage.getPendingResources().find(p => p.id === id.trim());
+      if (pendingResource) {
+        storage.deletePendingResource(pendingResource.id);
+        await reply(msg, `🗑️ Recurso *"${pendingResource.title}"* rechazado.`);
+        try {
+          await client.sendMessage(`${pendingResource.proposedBy}@c.us`,
+            `❌ Tu propuesta de recurso *"${pendingResource.title}"* fue rechazada.\n\n📝 Motivo: ${motivo}\n\nSi tienes dudas, contacta a un admin.`
           );
         } catch (e) {}
         return;
@@ -787,6 +847,111 @@ client.on('message', async msg => {
       storage.deleteNote(args.trim());
       await reply(msg, before > storage.getNotes().length
         ? '🗑️ Apuntes eliminados.'
+        : `❌ No encontré el ID \`${args.trim()}\``
+      );
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !recursos
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'recursos' || cmd === 'rc') {
+      const list = storage.getResources();
+      if (!list.length) { await reply(msg, '📭 No hay recursos guardados aún.'); return; }
+      const lines = list.map((r, i) =>
+        `*${i + 1}.* [${r.type}] ${r.title}`
+      );
+      await reply(msg, `📦 *Recursos disponibles (${list.length}):*\n\n${lines.join('\n')}\n\n_Usa \`!ver-recurso [número]\` para ver los detalles_`);
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !ver-recurso [n]
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'ver-recurso' || cmd === 'vrc') {
+      if (!args) { await reply(msg, '🔍 Uso: `!ver-recurso [número]`\n\nEjemplo: `!ver-recurso 2`\n\nUsa `!recursos` para ver la lista con números.'); return; }
+      const list = storage.getResources();
+      const n = parseInt(args.trim(), 10);
+      if (isNaN(n) || n < 1 || n > list.length) {
+        await reply(msg, `❌ Número inválido. Hay ${list.length} recurso(s). Usa \`!recursos\` para ver la lista.`);
+        return;
+      }
+      const res = list[n - 1];
+      await reply(msg,
+        `📦 *Recurso #${n}*\n\n🏷️ *Tipo:* ${res.type}\n📌 *Título:* ${res.title}\n📝 *Descripción:* ${res.description || '—'}\n🔗 *Link:* ${res.link || 'Sin link'}\n👤 *Por:* ${res.proposedBy || 'Admin'}`
+      );
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !buscar-recurso [consulta]
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'buscar-recurso' || cmd === 'brc') {
+      if (!args) { await reply(msg, '🔍 Uso: `!buscar-recurso [consulta]`\n\nEjemplo: `!buscar-recurso algoritmos`\n\nBusca por tipo, título o descripción.'); return; }
+      const allResources = storage.getResources();
+      const query = args.trim().toLowerCase();
+      const results = allResources
+        .map((res, i) => ({ res, n: i + 1 }))
+        .filter(({ res }) =>
+          res.type.toLowerCase().includes(query) ||
+          res.title.toLowerCase().includes(query) ||
+          (res.description || '').toLowerCase().includes(query)
+        );
+      if (!results.length) {
+        await reply(msg, `🔍 No se encontraron recursos para *"${args.trim()}"*.\n\nUsa \`!recursos\` para ver todos los disponibles.`);
+        return;
+      }
+      const lines = results.map(({ res, n }) => `*${n}.* [${res.type}] ${res.title}`);
+      await reply(msg, `🔍 *Resultados para "${args.trim()}" (${results.length}):*\n\n${lines.join('\n')}\n\n_Usa \`!ver-recurso [número]\` para ver los detalles_`);
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !proponer-recurso  (cualquiera)
+    // Formato: tipo | título | descripción | link
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'proponer-recurso' || cmd === 'prc') {
+      if (!args) {
+        await reply(msg,
+          `📥 Uso:\n\`!proponer-recurso tipo | título | descripción | link\`\n\n` +
+          `Ejemplo:\n\`!proponer-recurso video | Introducción a recursión | Video de YouTube muy claro | https://youtu.be/...\`\n\n` +
+          `📌 *Tipos sugeridos:* video, pdf, libro, herramienta, guía, enlace, ejercicios, otro`
+        );
+        return;
+      }
+      const parts = args.split('|').map(p => p.trim());
+      if (parts.length < 3) { await reply(msg, '❌ Faltan campos. Mínimo: `tipo | título | descripción`'); return; }
+      const [type, title, description, link] = parts;
+      if (!type || !title) { await reply(msg, '❌ El tipo y el título son obligatorios.'); return; }
+
+      const saved = storage.savePendingResource({
+        type, title, description: description || '', link: link || null,
+        proposedBy: number, proposedByName: name,
+      });
+      storage.incrementStat(number, name, 'resourcesProposed');
+      await reply(msg,
+        `✅ *Recurso enviado para revisión*\n\n🏷️ ${type} — ${title}\n📝 ${description || '—'}\n🔗 ${link || '—'}\n\n_Un admin lo revisará pronto. ¡Gracias por compartir!_ 🙏`
+      );
+      for (const adminNum of config.admins) {
+        try {
+          await client.sendMessage(`${adminNum}@c.us`,
+            `📦 *Nuevo recurso propuesto para revisión*\n\n👤 ${name}\n🏷️ ${type} — ${title}\n📝 ${description || '—'}\n🔗 ${link || '—'}\n🆔 \`${saved.id}\`\n\nAprueba con: \`!aprobar ${saved.id}\`\nRechaza con: \`!rechazar ${saved.id} [motivo]\``
+          );
+        } catch (e) {}
+      }
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !borrar-recurso [id] (ADMIN)
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'borrar-recurso') {
+      if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
+      if (!args) { await reply(msg, '❌ Uso: `!borrar-recurso [id]`'); return; }
+      const before = storage.getResources().length;
+      storage.deleteResource(args.trim());
+      await reply(msg, before > storage.getResources().length
+        ? '🗑️ Recurso eliminado.'
         : `❌ No encontré el ID \`${args.trim()}\``
       );
       return;

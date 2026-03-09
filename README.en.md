@@ -1,8 +1,9 @@
 # StudyBot 🤖📚
 
-WhatsApp bot for study groups with deadline reminders, homework tracking, notes sharing, anonymous questions, moderation, FAQ, and leaderboard. Built with [whatsapp-web.js](https://github.com/pedroslopez/whatsapp-web.js).
+WhatsApp bot for study groups with deadline reminders, homework tracking, notes sharing, resource sharing, anonymous questions, moderation, FAQ, and leaderboard. Built with [whatsapp-web.js](https://github.com/pedroslopez/whatsapp-web.js).
 
 > Bot interface and commands are in Spanish. See [README.md](README.md) for the Spanish version.
+
 
 ## Requirements
 
@@ -80,7 +81,7 @@ Configure the subjects for the current semester so users can propose homeworks o
 | `!ayuda` | Show available commands |
 | `!admins` | List group admins |
 | `!recordatorios` / `!r` | View upcoming deadlines |
-| `!proponer-recordatorio` / `!p-r` `"Title" YYYY-MM-DD [desc]` | Propose a reminder for admin review |
+| `!proponer-recordatorio` / `!pr` `"Title" YYYY-MM-DD [desc]` | Propose a reminder for admin review |
 | `!tareas` / `!t` | View all approved homeworks with numeric IDs |
 | `!ver-tarea` / `!vt` `[n]` | View full details of homework number N |
 | `!buscar-tarea` / `!bt` `[query]` | Search homeworks by subject, title, or description |
@@ -89,6 +90,10 @@ Configure the subjects for the current semester so users can propose homeworks o
 | `!ver-apuntes` / `!va` `[n]` | View full details of notes entry number N |
 | `!buscar-apuntes` / `!ba` `[query]` | Search notes by subject, title, or description |
 | `!proponer-apuntes` / `!pa` `subject \| title \| desc \| link` | Share notes for admin review |
+| `!recursos` / `!rc` | View all approved resources with numeric IDs |
+| `!ver-recurso` / `!vrc` `[n]` | View full details of resource number N |
+| `!buscar-recurso` / `!brc` `[query]` | Search resources by type, title, or description |
+| `!proponer-recurso` / `!prc` `type \| title \| desc \| link` | Propose a resource for admin review *(suggested types: video, pdf, libro, herramienta, guía, enlace, ejercicios, otro)* |
 | `!pregunta [text]` | Send anonymous question to the group *(DM only)* |
 | *(reply to a question message)* | Answer an anonymous question and earn points |
 | `!preguntas` | View recent anonymous questions and their answers |
@@ -108,6 +113,7 @@ Configure the subjects for the current semester so users can propose homeworks o
 | `!rechazar [id] [reason]` | Reject any pending proposal with an optional reason |
 | `!borrar-tarea [id]` | Delete an approved homework |
 | `!borrar-apuntes [id]` | Delete approved notes |
+| `!borrar-recurso [id]` | Delete approved resource |
 | `!add-faq keyword1,keyword2 \| Question \| Answer` | Add an FAQ entry |
 | `!del-faq [id]` | Delete an FAQ entry |
 | `!conf-premio Prize \| Points \| Sponsor` | Set the leaderboard prize |
@@ -115,7 +121,7 @@ Configure the subjects for the current semester so users can propose homeworks o
 | `!desmutear [@user]` | Unmute a user |
 | `!muteados` | List currently muted users |
 | `!inactivos` | List members inactive for ≥30 days |
-| `!all [message]` | Send a private DM to every non-admin group member |
+| `!todos [message]` | Send a private DM to every non-admin group member |
 | `!resumen-semanal` | Force the weekly digest |
 | `!test-recordatorios` | Force reminder check |
 | `!test-actividad` | Force inactivity check |
@@ -132,7 +138,21 @@ Configure the subjects for the current semester so users can propose homeworks o
 | **Inactivity check** | Runs daily at 10:00 AM (Bogotá); warns after `warnAfterDays`, removes after an additional `removeAfterDays` |
 | **FAQ auto-reply** | When a group message contains a keyword matching an FAQ entry, the bot replies automatically |
 | **FAQ from reminders** | Adding a reminder via `!recordatorio` automatically creates an FAQ entry with keywords extracted from the title/description. Deleting the reminder removes its FAQ entries. |
-| **Anonymous answer scoring** | Replying (quote) to an anonymous question message in the group awards +3 points |
+| **Anonymous answer scoring** | Replying (quote) to an anonymous question message in the group awards +2 points |
+
+## Points system
+
+| Action | Points |
+|---|---|
+| Task approved | +7 |
+| Task proposed | +3 |
+| Notes approved | +5 |
+| Notes proposed | +2 |
+| Resource approved | +2 |
+| Resource proposed | +1 |
+| Anonymous question answered | +2 |
+| Anonymous question asked | +1 |
+| Reminder approved | +1 |
 
 ## License
 

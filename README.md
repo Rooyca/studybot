@@ -1,6 +1,6 @@
 # StudyBot 🤖📚
 
-Bot de WhatsApp para grupos de estudio con recordatorios de entregas, seguimiento de tareas, compartir apuntes, preguntas anónimas, moderación, FAQ y leaderboard. Construido con [whatsapp-web.js](https://github.com/pedroslopez/whatsapp-web.js).
+Bot de WhatsApp para grupos de estudio con recordatorios de entregas, seguimiento de tareas, compartir apuntes, compartir recursos, preguntas anónimas, moderación, FAQ y leaderboard. Construido con [whatsapp-web.js](https://github.com/pedroslopez/whatsapp-web.js).
 
 > La interfaz y los comandos del bot están en español. Ver [README.md](README.md) para la versión en inglés.
 
@@ -80,7 +80,7 @@ Configurá las materias del cuatrimestre para que los usuarios puedan proponer t
 | `!ayuda` | Mostrar los comandos disponibles |
 | `!admins` | Listar los administradores del grupo |
 | `!recordatorios` / `!r` | Ver próximas fechas de entrega |
-| `!proponer-recordatorio` / `!p-r` `"Título" YYYY-MM-DD [desc]` | Proponer un recordatorio para revisión de un admin |
+| `!proponer-recordatorio` / `!pr` `"Título" YYYY-MM-DD [desc]` | Proponer un recordatorio para revisión de un admin |
 | `!tareas` / `!t` | Ver todas las tareas aprobadas con IDs numéricos |
 | `!ver-tarea` / `!vt` `[n]` | Ver el detalle completo de la tarea número N |
 | `!buscar-tarea` / `!bt` `[consulta]` | Buscar tareas por materia, título o descripción |
@@ -89,6 +89,10 @@ Configurá las materias del cuatrimestre para que los usuarios puedan proponer t
 | `!ver-apuntes` / `!va` `[n]` | Ver el detalle completo del apunte número N |
 | `!buscar-apuntes` / `!ba` `[consulta]` | Buscar apuntes por materia, título o descripción |
 | `!proponer-apuntes` / `!pa` `materia \| título \| desc \| link` | Compartir apuntes para revisión de un admin |
+| `!recursos` / `!rc` | Ver todos los recursos aprobados con IDs numéricos |
+| `!ver-recurso` / `!vrc` `[n]` | Ver el detalle completo del recurso número N |
+| `!buscar-recurso` / `!brc` `[consulta]` | Buscar recursos por tipo, título o descripción |
+| `!proponer-recurso` / `!prc` `tipo \| título \| desc \| link` | Proponer un recurso para revisión de un admin *(tipos sugeridos: video, pdf, libro, herramienta, guía, enlace, ejercicios, otro)* |
 | `!pregunta [texto]` | Enviar una pregunta anónima al grupo *(solo desde privado)* |
 | *(responder citando el mensaje de la pregunta)* | Responder una pregunta anónima y ganar puntos |
 | `!preguntas` | Ver preguntas anónimas recientes con sus respuestas |
@@ -108,6 +112,7 @@ Configurá las materias del cuatrimestre para que los usuarios puedan proponer t
 | `!rechazar [id] [motivo]` | Rechazar cualquier propuesta con un motivo opcional |
 | `!borrar-tarea [id]` | Eliminar una tarea aprobada |
 | `!borrar-apuntes [id]` | Eliminar apuntes aprobados |
+| `!borrar-recurso [id]` | Eliminar un recurso aprobado |
 | `!add-faq keyword1,keyword2 \| Pregunta \| Respuesta` | Agregar una entrada de FAQ |
 | `!del-faq [id]` | Eliminar una entrada de FAQ |
 | `!conf-premio Premio \| Puntos \| Patrocinador` | Configurar el premio del leaderboard |
@@ -115,7 +120,7 @@ Configurá las materias del cuatrimestre para que los usuarios puedan proponer t
 | `!desmutear [@usuario]` | Desilenciar un usuario |
 | `!muteados` | Ver usuarios actualmente silenciados |
 | `!inactivos` | Listar miembros inactivos hace ≥30 días |
-| `!all [mensaje]` | Enviar un mensaje privado a todos los miembros no-admin del grupo |
+| `!todos [mensaje]` | Enviar un mensaje privado a todos los miembros no-admin del grupo |
 | `!resumen-semanal` | Forzar el resumen semanal |
 | `!test-recordatorios` | Forzar la revisión de recordatorios |
 | `!test-actividad` | Forzar la revisión de inactividad |
@@ -132,7 +137,21 @@ Configurá las materias del cuatrimestre para que los usuarios puedan proponer t
 | **Revisión de inactividad** | Se ejecuta diariamente a las 10:00 AM (Bogotá); advierte tras `warnAfterDays` días y remueve tras `removeAfterDays` días adicionales |
 | **Auto-respuesta de FAQ** | Cuando un mensaje del grupo contiene una palabra clave que coincide con una entrada de FAQ, el bot responde automáticamente |
 | **FAQ desde recordatorios** | Al agregar un recordatorio con `!recordatorio`, se crea automáticamente una entrada de FAQ con palabras clave extraídas del título y descripción. Al borrar el recordatorio, también se eliminan sus FAQs. |
-| **Puntos por responder preguntas** | Responder (citando) el mensaje de una pregunta anónima en el grupo otorga +3 puntos |
+| **Puntos por responder preguntas** | Responder (citando) el mensaje de una pregunta anónima en el grupo otorga +2 puntos |
+
+## Sistema de puntos
+
+| Acción | Puntos |
+|---|---|
+| Tarea aprobada | +7 |
+| Tarea propuesta | +3 |
+| Apunte aprobado | +5 |
+| Apunte propuesto | +2 |
+| Recurso aprobado | +2 |
+| Recurso propuesto | +1 |
+| Pregunta anónima respondida | +2 |
+| Pregunta anónima enviada | +1 |
+| Recordatorio aprobado | +1 |
 
 ## Licencia
 
