@@ -16,15 +16,12 @@
 //   !ver-recurso [n]            — Ver detalle de un recurso por su número
 //   !buscar-recurso [consulta]  — Buscar recursos por tipo, título o descripción
 //   !proponer-recurso           — Proponer un recurso para revisión
-//   !pregunta [texto]           — Enviar pregunta anónima al grupo (desde privado)
 //   !faq                        — Ver preguntas frecuentes
 //   !tabla                      — Ver leaderboard
 //   !puntos                     — Ver tus propias estadísticas
 //   !premio                     — Ver el premio actual del leaderboard
-//   (responde citando el mensaje de la pregunta para ganar puntos)
+//   (responde citando la pregunta del día para ganar puntos)
 //   !admins                     — Ver administradores
-//
-// COMANDOS ADMIN:
 //   !recordatorio "T" YYYY-MM-DD [desc]   — Agregar recordatorio
 //   !borrar-recordatorio [id]             — Borrar recordatorio
 //   !pendientes                           — Ver todas las propuestas esperando revisión (tareas, apuntes, recursos, recordatorios)
@@ -52,10 +49,10 @@ const qrcode = require('qrcode-terminal');
 const config = require('./config.json');
 
 const storage    = require('./handlers/storage');
-const { startCrons, checkAndSendReminders, sendWeeklySummary, parseReminderCommand, formatDate, daysDiff } = require('./handlers/reminders');
+const { startCrons, checkAndSendReminders, checkAndSendTodayReminders, sendWeeklySummary, parseReminderCommand, formatDate, daysDiff } = require('./handlers/reminders');
 const { runModeration, formatTime } = require('./handlers/moderation');
 const { buildLeaderboard, buildUserStats }  = require('./handlers/stats');
-const { publishQuestion, processAnswer, buildQuestionsList } = require('./handlers/questions');
+const { sendScheduledQuestion, processAnswer, buildQuestionsList } = require('./handlers/questions');
 const { checkInactivity } = require('./handlers/activity');
 
 // ─── Client setup ─────────────────────────────────────────────────────────────
@@ -173,9 +170,9 @@ const HELP_PUBLIC = `
 • \`!buscar-recurso / !brc [consulta]\` — Buscar recursos
 • \`!proponer-recurso / !prc tipo | título | desc | link\` — Compartir un recurso útil
 
-❓ *Preguntas*
-• \`!pregunta [texto]\` — Enviar pregunta anónima al grupo _(desde los mensajes privados del bot)_
-• _Responde citando el mensaje de la pregunta para ganar puntos_
+❓ *Preguntas del día*
+• El bot publica preguntas automáticamente a lo largo del día
+• _Responde citando la pregunta para ganar puntos_
 • \`!preguntas\` — Ver preguntas recientes con sus respuestas
 
 🏆 *Estadísticas*
@@ -958,31 +955,7 @@ client.on('message', async msg => {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // !pregunta [texto]  — Solo desde privado
-    // ══════════════════════════════════════════════════════════════════════════
-    if (cmd === 'pregunta') {
-      if (isGroup) {
-        await reply(msg, '🙈 Las preguntas anónimas se envían en *privado* (chat directo conmigo), no en el grupo.\n\nEscríbeme: `!pregunta [tu pregunta]`');
-        return;
-      }
-      if (!config.anonymous.enabled) { await reply(msg, '❌ Las preguntas anónimas están desactivadas.'); return; }
-      if (!args) {
-        await reply(msg, '🙋 Uso: `!pregunta [tu pregunta aquí]`\n\nEjemplo:\n`!pregunta ¿Cómo se resuelven las integrales por partes?`');
-        return;
-      }
-      try {
-        await publishQuestion(client, config, number, name, args);
-        await reply(msg, config.anonymous.confirmMessage +
-          '\n\n_Alguien que sepa puede responder citando el mensaje en el grupo._');
-      } catch (err) {
-        await reply(msg, '❌ Error al publicar en el grupo. Contacta a un admin.');
-        console.error('[ANON QUESTION ERROR]', err);
-      }
-      return;
-    }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // !preguntas — Ver historial de preguntas anónimas con respuestas
+    // !preguntas — Ver historial de preguntas del día con respuestas
     // ══════════════════════════════════════════════════════════════════════════
     if (cmd === 'preguntas') {
       await reply(msg, buildQuestionsList());
@@ -1050,7 +1023,7 @@ client.on('message', async msg => {
     // ══════════════════════════════════════════════════════════════════════════
     if (cmd === 'puntos') {
       const text = buildUserStats(number);
-      await reply(msg, text || '📊 Aún no tienes estadísticas. ¡Empieza a proponer tareas/recordatorios y responder preguntas!');
+      await reply(msg, text || '📊 Aún no tienes estadísticas. ¡Empieza a proponer tareas/apuntes/recordatorios y responder preguntas!');
       return;
     }
 
@@ -1190,6 +1163,7 @@ client.on('message', async msg => {
       if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
       await reply(msg, '🔄 Revisando recordatorios...');
       await checkAndSendReminders(client, config);
+      await checkAndSendTodayReminders(client, config);
       await reply(msg, '✅ Revisión completada.');
       return;
     }

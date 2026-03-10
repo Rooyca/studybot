@@ -3,6 +3,7 @@
 const cron = require('node-cron');
 const { getActiveReminders, getReminders } = require('./storage');
 const { checkInactivity } = require('./activity');
+const { sendScheduledQuestion } = require('./questions');
 
 const TZ = 'America/Bogota';
 
@@ -43,11 +44,26 @@ async function checkAndSendReminders(client, config) {
     let msg = null;
     if (diff === 4 && reminderDays.includes(4)) msg = fillTemplate(messages.reminder4days, reminder);
     if (diff === 2 && reminderDays.includes(2)) msg = fillTemplate(messages.reminder2days, reminder);
-    if (diff === 0 && reminderDays.includes(0)) msg = fillTemplate(messages.reminderToday, reminder);
+    // diff === 0 is handled separately by checkAndSendTodayReminders
     if (msg) {
       try { await client.sendMessage(groupId, msg); }
       catch (err) { console.error('[REMINDER ERROR]', err.message); }
     }
+  }
+}
+
+/**
+ * Sends the "today is due" reminder for every active reminder whose date is today.
+ * Called multiple times throughout the day based on reminderTodayRepeat config.
+ */
+async function checkAndSendTodayReminders(client, config) {
+  if (!config.reminderDays.includes(0)) return;
+  const reminders = getActiveReminders();
+  for (const reminder of reminders) {
+    if (daysDiff(reminder.date) !== 0) continue;
+    const msg = fillTemplate(config.messages.reminderToday, reminder);
+    try { await client.sendMessage(config.groupId, msg); }
+    catch (err) { console.error('[REMINDER TODAY ERROR]', err.message); }
   }
 }
 
@@ -79,6 +95,7 @@ async function sendWeeklySummary(client, config) {
 }
 
 function startCrons(client, config) {
+  // 4-day and 2-day advance reminders at 8:00 AM
   cron.schedule('0 8 * * *', () => checkAndSendReminders(client, config), { timezone: TZ });
 
   const { dayOfWeek = 1, hour = 9 } = config.weeklySummary;
@@ -88,6 +105,48 @@ function startCrons(client, config) {
 
   // Daily inactivity check at 10:00
   cron.schedule('0 10 * * *', () => checkInactivity(client, config), { timezone: TZ });
+
+  // "Today is due" reminders: repeated throughout the day
+  const tr = config.reminderTodayRepeat;
+  if (tr && tr.enabled && config.reminderDays.includes(0)) {
+    const start = tr.startHour ?? 8;
+    const end   = tr.endHour   ?? 20;
+    const times = tr.times     ?? 1;
+    const slotSize = (end - start) / times;
+
+    for (let i = 0; i < times; i++) {
+      const slotHour = start + i * slotSize + slotSize / 2;
+      const h = Math.floor(slotHour);
+      const m = Math.round((slotHour - h) * 60);
+      cron.schedule(`${m} ${h} * * *`, () => {
+        checkAndSendTodayReminders(client, config).catch(err =>
+          console.error('[REMINDER TODAY ERROR]', err.message)
+        );
+      }, { timezone: TZ });
+      console.log(`[REMINDER TODAY] Programado para las ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')} (aviso ${i + 1}/${times})`);
+    }
+  }
+
+  // Daily questions: spread evenly between startHour and endHour
+  const dq = config.dailyQuestions;
+  if (dq && dq.enabled && dq.questionsPerDay > 0) {
+    const start = dq.startHour ?? 8;
+    const end   = dq.endHour   ?? 20;
+    const count = dq.questionsPerDay;
+    const slotSize = (end - start) / count;
+
+    for (let i = 0; i < count; i++) {
+      const slotHour = start + i * slotSize + slotSize / 2;
+      const h = Math.floor(slotHour);
+      const m = Math.round((slotHour - h) * 60);
+      cron.schedule(`${m} ${h} * * *`, () => {
+        sendScheduledQuestion(client, config).catch(err =>
+          console.error('[DAILY QUESTION ERROR]', err.message)
+        );
+      }, { timezone: TZ });
+      console.log(`[DAILY QUESTION] Programada para las ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')} (slot ${i + 1}/${count})`);
+    }
+  }
 }
 
 function parseReminderCommand(args) {
@@ -103,4 +162,4 @@ function parseReminderCommand(args) {
   return { title, date: dateStr, description };
 }
 
-module.exports = { startCrons, checkAndSendReminders, sendWeeklySummary, parseReminderCommand, formatDate, daysDiff, todayBogota };
+module.exports = { startCrons, checkAndSendReminders, checkAndSendTodayReminders, sendWeeklySummary, parseReminderCommand, formatDate, daysDiff, todayBogota };

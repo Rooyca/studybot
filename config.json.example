@@ -10,6 +10,13 @@
 
   "reminderDays": [4, 2, 0],
 
+  "reminderTodayRepeat": {
+    "enabled": true,
+    "times": 3,
+    "startHour": 8,
+    "endHour": 20
+  },
+
   "weeklySummary": {
     "enabled": true,
     "dayOfWeek": 1,
@@ -31,11 +38,12 @@
     "deletedMessage": "🔇 Tu mensaje fue eliminado porque estás silenciado hasta las {until}. Contacta a un admin si crees que es un error."
   },
 
-  "anonymous": {
+  "dailyQuestions": {
     "enabled": true,
-    "publishPrefix": "🙋 *Pregunta anónima:*\n\n",
-    "confirmMessage": "✅ Tu pregunta fue enviada al grupo de forma anónima. ¡Alguien del grupo te responderá pronto!",
-    "replyInstruction": "\n\n_Responde a esta pregunta en el grupo usando_ `!responder [tu respuesta]` _para que quede registrado._"
+    "questionsPerDay": 3,
+    "startHour": 8,
+    "endHour": 20,
+    "message": "🤔 *Pregunta del día:*\n\n{question}\n\n_Responde citando este mensaje para ganar puntos._"
   },
 
   "messages": {
@@ -46,7 +54,7 @@
 
   "welcome": {
     "enabled": true,
-    "message": "👋 ¡Bienvenido/a al grupo, @{name}! 🎉\n\nAquí tienes todo lo que necesitas saber:\n\n📜 *Reglas del grupo:*\n 1. Respeto ante todo — trato amable entre compañeros.\n 2. Solo contenido relacionado con los estudios.\n 3. No publicidad, spam ni links externos NO solicitados.\n 4. Comparte recursos útiles: tareas, apuntes, recordatorios.\n 5. Ante dudas, consulta a los admins.\n\n🤖 *Comandos útiles:*\n• `!tareas` — Ver tareas resueltas\n• `!recordatorios` — Ver fechas de entrega próximas\n• `!pregunta [texto]` — Hacer una pregunta anónima _(desde el privado del bot)_\n• `!ayuda` — Ver todos los comandos disponibles\n\n¡Mucho éxito en tus estudios! 💪📚"
+    "message": "👋 ¡Bienvenido/a al grupo, @{name}! 🎉\n\nAquí tienes todo lo que necesitas saber:\n\n📜 *Reglas del grupo:*\n 1. Respeto ante todo — trato amable entre compañeros.\n 2. Solo contenido relacionado con los estudios.\n 3. No publicidad, spam ni links externos NO solicitados.\n 4. Comparte recursos útiles: tareas, apuntes, recordatorios.\n 5. Ante dudas, consulta a los admins.\n\n🤖 *Comandos útiles:*\n• `!tareas` — Ver tareas resueltas\n• `!recordatorios` — Ver fechas de entrega próximas\n• `!preguntas` — Ver las preguntas del día y responder para ganar puntos\n• `!ayuda` — Ver todos los comandos disponibles\n\n¡Mucho éxito en tus estudios! 💪📚"
   },
 
   "subjects": [

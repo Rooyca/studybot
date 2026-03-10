@@ -1,28 +1,40 @@
-// sistema de preguntas anónimas
+// sistema de preguntas del día
 
-const { saveQuestion, getQuestions, updateQuestion, incrementStat } = require('./storage');
+const { saveQuestion, getQuestions, updateQuestion, incrementStat, getDailyQuestions, saveDailyQuestions } = require('./storage');
 
 /**
- * Publica la pregunta en el grupo y guarda el groupMsgId devuelto.
- * Retorna la entrada guardada.
+ * Picks a random question from the daily-questions pool, removes it from the
+ * file, sends it to the group and registers it in questions.json so answers
+ * can still be tracked and scored.
+ *
+ * Returns true if a question was sent, false if the pool is empty.
  */
-async function publishQuestion(client, config, askerNumber, askerName, questionText) {
+async function sendScheduledQuestion(client, config) {
+  const pool = getDailyQuestions();
+  if (!pool.length) {
+    console.log('[DAILY QUESTION] No hay preguntas disponibles en el banco.');
+    return false;
+  }
+
+  const idx = Math.floor(Math.random() * pool.length);
+  const questionText = pool[idx];
+  pool.splice(idx, 1);
+  saveDailyQuestions(pool);
+
   const entry = saveQuestion({
     question: questionText,
-    askedBy:  askerNumber,
-    askedByName: askerName,
+    askedBy:  'bot',
+    askedByName: 'Bot',
   });
-  incrementStat(askerNumber, askerName, 'questionsAsked');
 
-  const groupText =
-    `🙋 *Pregunta anónima:*\n\n${questionText}\n\n` +
-    `_Responde citando este mensaje para ganar puntos._`;
+  const { message = '🤔 *Pregunta del día:*\n\n{question}\n\n_Responde citando este mensaje para ganar puntos._' } = config.dailyQuestions;
+  const groupText = message.replace('{question}', questionText);
 
-  // Guardar el ID del mensaje publicado para poder vincularlo cuando alguien responda
   const sentMsg = await client.sendMessage(config.groupId, groupText);
   updateQuestion(entry.id, { groupMsgId: sentMsg.id._serialized });
 
-  return entry;
+  console.log(`[DAILY QUESTION] Enviada: "${questionText.slice(0, 60)}…"`);
+  return true;
 }
 
 /**
@@ -99,7 +111,7 @@ function buildQuestionsList(limit = 10) {
     .reverse(); // más recientes primero
 
   if (!questions.length) {
-    return '🙋 No hay preguntas anónimas registradas todavía.';
+    return '🤔 No hay preguntas del día registradas todavía.';
   }
 
   const lines = questions.map((q, i) => {
@@ -113,7 +125,7 @@ function buildQuestionsList(limit = 10) {
     return `${status} — *P:* ${q.question}\n${answer}${extras}`;
   });
 
-  return `🙋 *Preguntas anónimas recientes:*\n\n${lines.join('\n\n')}`;
+  return `🤔 *Preguntas del día recientes:*\n\n${lines.join('\n\n')}`;
 }
 
-module.exports = { publishQuestion, processAnswer, buildQuestionsList };
+module.exports = { sendScheduledQuestion, processAnswer, buildQuestionsList };

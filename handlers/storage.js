@@ -16,6 +16,7 @@ const FILES = {
   stats:            path.join(__dirname, '../data/stats.json'),
   muted:            path.join(__dirname, '../data/muted.json'),
   questions:        path.join(__dirname, '../data/questions.json'),
+  dailyQuestions:   path.join(__dirname, '../data/daily-questions.json'),
   logs:             path.join(__dirname, '../data/logs.json'),
   activity:         path.join(__dirname, '../data/activity.json'),
   prize:            path.join(__dirname, '../data/prize.json'),
@@ -353,6 +354,14 @@ function cleanExpiredMutes() {
   write('muted', getMuted().filter(m => new Date(m.until) > now));
 }
 
+// ─── Daily questions (programmed by the bot) ─────────────────────────────────
+
+/** Returns the pending daily questions list (array of strings). */
+function getDailyQuestions() { return read('dailyQuestions'); }
+
+/** Persists the updated daily questions list. */
+function saveDailyQuestions(list) { write('dailyQuestions', list); }
+
 // ─── Anonymous questions ──────────────────────────────────────────────────────
 
 function getQuestions() { return read('questions'); }
@@ -454,6 +463,8 @@ module.exports = {
   getMuted, muteUser, unmuteUser, isMuted, cleanExpiredMutes,
   // questions
   getQuestions, saveQuestion, updateQuestion, markAnswered,
+  // daily questions
+  getDailyQuestions, saveDailyQuestions,
   // activity
   getActivity, updateLastSeen, setWarnedAt,
   // prize
