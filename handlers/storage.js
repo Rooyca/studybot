@@ -277,23 +277,23 @@ function incrementStat(number, name, metric, amount = 1) {
       resourcesApproved: 0,
       questionsAnswered: 0,
       questionsAsked: 0,
+      questionPoints: 0,
       remindersApproved: 0,
       totalPoints: 0,
     };
   }
   stats[number].name = name; // actualiza nombre si cambió
   if (!stats[number].remindersApproved) stats[number].remindersApproved = 0;
-  if (!stats[number].notesProposed) stats[number].notesProposed = 0;
-  if (!stats[number].notesApproved) stats[number].notesApproved = 0;
+  if (!stats[number].notesProposed)     stats[number].notesProposed     = 0;
+  if (!stats[number].notesApproved)     stats[number].notesApproved     = 0;
   if (!stats[number].resourcesProposed) stats[number].resourcesProposed = 0;
   if (!stats[number].resourcesApproved) stats[number].resourcesApproved = 0;
+  if (!stats[number].questionPoints)    stats[number].questionPoints    = 0;
   stats[number][metric] = (stats[number][metric] || 0) + amount;
 
-  // Recalcular puntos:
-  // Tarea aprobada = 7 pts, Propuesta = 3 pts,
-  // Apunte aprobado = 5 pts, Propuesto = 2 pts,
-  // Recurso aprobado = 4 pts, Propuesto = 2 pts,
-  // Respuesta = 2 pts, Pregunta = 1 pt, Recordatorio aprobado = 1 pt
+  // Recalcular puntos totales.
+  // Los puntos por preguntas son variables (2 fácil / 3 normal / 4 difícil)
+  // y se acumulan en questionPoints en lugar de calcularse desde el conteo.
   const s = stats[number];
   s.totalPoints =
     (s.tasksApproved     * 7) +
@@ -302,7 +302,7 @@ function incrementStat(number, name, metric, amount = 1) {
     (s.notesProposed     * 2) +
     (s.resourcesApproved * 2) +
     (s.resourcesProposed * 1) +
-    (s.questionsAnswered * 2) +
+    (s.questionPoints    || 0) +
     (s.questionsAsked    * 1) +
     (s.remindersApproved * 1);
 
@@ -356,10 +356,10 @@ function cleanExpiredMutes() {
 
 // ─── Daily questions (programmed by the bot) ─────────────────────────────────
 
-/** Returns the pending daily questions list (array of strings). */
+/** Returns the pending daily questions pool (array of { question, answer } objects). */
 function getDailyQuestions() { return read('dailyQuestions'); }
 
-/** Persists the updated daily questions list. */
+/** Persists the updated daily questions pool. */
 function saveDailyQuestions(list) { write('dailyQuestions', list); }
 
 // ─── Anonymous questions ──────────────────────────────────────────────────────

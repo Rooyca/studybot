@@ -32,6 +32,7 @@
 //   !borrar-recurso [id]                  — Borrar recurso aprobado
 //   !add-faq [keyword1,keyword2] | [q] | [a]  — Agregar FAQ
 //   !del-faq [id]                         — Borrar FAQ
+//   !add-pregunta fácil|normal|difícil | [pregunta] | [respuesta]  — Agregar pregunta al banco
 //   !conf-premio premio | puntos | patrocinador  — Configurar premio del leaderboard
 //   !mutear [@mention o número] [min] [motivo]  — Mutear usuario
 //   !desmutear [@mention o número]        — Desmutear usuario
@@ -52,7 +53,7 @@ const storage    = require('./handlers/storage');
 const { startCrons, checkAndSendReminders, checkAndSendTodayReminders, sendWeeklySummary, parseReminderCommand, formatDate, daysDiff } = require('./handlers/reminders');
 const { runModeration, formatTime } = require('./handlers/moderation');
 const { buildLeaderboard, buildUserStats }  = require('./handlers/stats');
-const { sendScheduledQuestion, processAnswer, buildQuestionsList } = require('./handlers/questions');
+const { sendScheduledQuestion, processAnswer, buildQuestionsList, parseDifficulty, DIFFICULTY_POINTS, DIFFICULTY_LABELS } = require('./handlers/questions');
 const { checkInactivity } = require('./handlers/activity');
 
 // ─── Client setup ─────────────────────────────────────────────────────────────
@@ -172,7 +173,7 @@ const HELP_PUBLIC = `
 
 ❓ *Preguntas del día*
 • El bot publica preguntas automáticamente a lo largo del día
-• _Responde citando la pregunta para ganar puntos_
+• _Responde citando la pregunta para ganar puntos (🟢 fácil +2 / 🟡 normal +3 / 🔴 difícil +4)_
 • \`!preguntas\` — Ver preguntas recientes con sus respuestas
 
 🏆 *Estadísticas*
@@ -199,6 +200,10 @@ const HELP_ADMIN = `
 ❓ *FAQ*
 \`!add-faq keyword1,keyword2 | Pregunta | Respuesta\`
 \`!del-faq [id]\`
+
+🤔 *Banco de preguntas del día*
+\`!add-pregunta fácil|normal|difícil | Pregunta | Respuesta\`
+_(agrega al banco; se publicará automáticamente según el horario configurado)_
 
 🎁 *Premio*
 \`!conf-premio Premio | Puntos | Patrocinador\`
@@ -237,18 +242,27 @@ client.on('message', async msg => {
     if (isGroup && !body.startsWith(pfx)) {
       await runModeration(msg, config);
 
-      // ── Auto-respuesta a preguntas anónimas (reply sin comando) ─────────────
+      // ── Respuesta a pregunta del día (reply sin comando) ─────────────────────
       if (msg.hasQuotedMsg && body.length > 5) {
         const result = await processAnswer(msg, number, name, body);
         switch (result.status) {
           case 'not_a_question':
-            break; // no es una pregunta anónima, ignorar silenciosamente
+            break; // no es una pregunta del día, ignorar silenciosamente
 
           case 'incoherent':
             await reply(msg,
               `🤔 Tu respuesta es muy corta.\n\n` +
               `📌 Pregunta: _"${result.question}"_\n\n` +
               `_Escribe algo más elaborado para ganar puntos._`
+            );
+            break;
+
+          case 'wrong_answer':
+            await reply(msg,
+              `❌ *Tu respuesta no coincide suficientemente con la respuesta esperada.*\n\n` +
+              `📌 Pregunta: _"${result.question}"_\n\n` +
+              `📖 *Respuesta correcta:* ${result.correctAnswer}\n\n` +
+              `_Intenta incluir los conceptos clave en tu respuesta._`
             );
             break;
 
@@ -261,15 +275,11 @@ client.on('message', async msg => {
 
           case 'accepted':
             await reply(msg,
-              `🎉 *¡Respuesta aceptada!*\n\n` +
+              `🎉 *¡Respuesta correcta!*\n\n` +
               `📌 Pregunta: _"${result.question}"_\n` +
-              `💬 Tu respuesta quedó guardada y vinculada.\n\n` +
-              `⭐ *+2 puntos* en el leaderboard. ¡Gracias por ayudar!`
+              `💬 Tu respuesta quedó guardada.\n\n` +
+              `⭐ *+${result.points} puntos* en el leaderboard. ¡Bien hecho!`
             );
-            break;
-
-          case 'api_error':
-            await reply(msg, '⚠️ No se pudo validar la respuesta automáticamente. Un admin la revisará.');
             break;
         }
       }
@@ -1007,6 +1017,53 @@ client.on('message', async msg => {
       const before = storage.getFaqs().length;
       storage.deleteFaq(args.trim());
       await reply(msg, before > storage.getFaqs().length ? '🗑️ FAQ eliminada.' : `❌ No encontré el ID \`${args.trim()}\``);
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !add-pregunta dificultad | Pregunta | Respuesta  (ADMIN)
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'add-pregunta') {
+      if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
+      if (!args) {
+        await reply(msg,
+          `❓ *Uso:*\n\`!add-pregunta dificultad | Pregunta | Respuesta\`\n\n` +
+          `*Dificultades:*\n` +
+          `🟢 \`fácil\` — ${DIFFICULTY_POINTS.easy} pts\n` +
+          `🟡 \`normal\` — ${DIFFICULTY_POINTS.normal} pts\n` +
+          `🔴 \`difícil\` — ${DIFFICULTY_POINTS.hard} pts\n\n` +
+          `*Ejemplo:*\n\`!add-pregunta normal | ¿Qué es la recursión? | Una función que se llama a sí misma hasta un caso base.\``
+        );
+        return;
+      }
+
+      const parts = args.split('|').map(p => p.trim());
+      if (parts.length < 3) {
+        await reply(msg, '❌ Faltan campos. Formato: `dificultad | pregunta | respuesta`');
+        return;
+      }
+
+      const [diffRaw, questionText, answerText] = parts;
+      const difficulty = parseDifficulty(diffRaw);
+      if (!difficulty) {
+        await reply(msg, `❌ Dificultad inválida: *"${diffRaw}"*\n\nUsa \`fácil\`, \`normal\` o \`difícil\`.`);
+        return;
+      }
+      if (!questionText) { await reply(msg, '❌ La pregunta no puede estar vacía.'); return; }
+      if (!answerText)   { await reply(msg, '❌ La respuesta no puede estar vacía.'); return; }
+
+      const points = DIFFICULTY_POINTS[difficulty];
+      const pool   = storage.getDailyQuestions();
+      pool.push({ question: questionText, answer: answerText, difficulty });
+      storage.saveDailyQuestions(pool);
+
+      const diffLabel = DIFFICULTY_LABELS[difficulty];
+      await reply(msg,
+        `✅ *Pregunta agregada al banco* (${pool.length} en total)\n\n` +
+        `${diffLabel} — *${points} pts*\n` +
+        `❓ *Pregunta:* ${questionText}\n` +
+        `📖 *Respuesta:* ${answerText}`
+      );
       return;
     }
 

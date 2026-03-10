@@ -1,6 +1,6 @@
 # StudyBot 🤖📚
 
-WhatsApp bot for study groups with deadline reminders, homework tracking, notes sharing, resource sharing, anonymous questions, moderation, FAQ, and leaderboard. Built with [whatsapp-web.js](https://github.com/pedroslopez/whatsapp-web.js).
+WhatsApp bot for study groups with deadline reminders, homework tracking, notes sharing, resource sharing, daily questions, moderation, FAQ, and leaderboard. Built with [whatsapp-web.js](https://github.com/pedroslopez/whatsapp-web.js).
 
 > Bot interface and commands are in Spanish. See [README.md](README.md) for the Spanish version.
 
@@ -42,13 +42,14 @@ All settings live in `config.json`. See `config.json.example` for the full struc
 | `prefix` | Command prefix character (default `"!"`) |
 | `subjects` | List of subjects with aliases and Drive folder links (see below) |
 | `reminderDays` | Days before deadline to send reminders (e.g. `[4, 2, 0]`) |
+| `reminderTodayRepeat` | Repeat "due today" reminders throughout the day (`enabled`, `times`, `startHour`, `endHour`) |
 | `weeklySummary` | Weekly digest config (day, hour, message template) |
 | `messages` | Reminder notification templates (4 days, 2 days, today) |
 | `wordWarnings` | Auto-warn on forbidden words |
-| `mute` | Mute durations and message templates |
+| `mute` | Mute durations (`defaultMinutes`, `maxMinutes`) and message templates |
 | `welcome` | Welcome message for new members |
-| `anonymous` | Anonymous questions config (enabled flag, message templates) |
-| `activityCheck` | Inactivity warning and removal thresholds |
+| `dailyQuestions` | Daily questions config (`enabled`, `questionsPerDay`, `startHour`, `endHour`, `message`) |
+| `activityCheck` | Inactivity warning and removal thresholds (`warnAfterDays`, `removeAfterDays`) |
 
 ### Subjects (`config.subjects`)
 
@@ -69,6 +70,32 @@ Configure the subjects for the current semester so users can propose homeworks o
 - `aliases` — alternative spellings accepted from users (case-insensitive)
 - `driveFolder` — Google Drive folder URL auto-filled when a user proposes a homework
 - `notesFolder` — Google Drive folder URL auto-filled when a user proposes notes
+
+### Daily questions bank (`data/daily-questions.json`)
+
+Each entry in the pool is an object with the question, its reference answer, and a difficulty level:
+
+```json
+[
+  {
+    "question": "What is the difference between an array and a linked list?",
+    "answer": "An array stores elements contiguously in memory with O(1) index access, while a linked list uses nodes with pointers allowing O(1) insert/delete but O(n) access.",
+    "difficulty": "normal"
+  }
+]
+```
+
+- `question` — question text the bot will publish to the group
+- `answer` — reference correct answer used to validate user replies
+- `difficulty` — difficulty level: `easy`, `normal`, or `hard`
+
+| Difficulty | Points |
+|---|---|
+| `easy` (🟢) | +2 |
+| `normal` (🟡) | +3 |
+| `hard` (🔴) | +4 |
+
+When the bot publishes a question it is removed from the pool. User replies are validated by keyword similarity against `answer` (25 % threshold). Admins can also add questions directly from the chat using `!add-pregunta`.
 
 ## Commands
 
@@ -94,9 +121,7 @@ Configure the subjects for the current semester so users can propose homeworks o
 | `!ver-recurso` / `!vrc` `[n]` | View full details of resource number N |
 | `!buscar-recurso` / `!brc` `[query]` | Search resources by type, title, or description |
 | `!proponer-recurso` / `!prc` `type \| title \| desc \| link` | Propose a resource for admin review *(suggested types: video, pdf, libro, herramienta, guía, enlace, ejercicios, otro)* |
-| `!pregunta [text]` | Send anonymous question to the group *(DM only)* |
-| *(reply to a question message)* | Answer an anonymous question and earn points |
-| `!preguntas` | View recent anonymous questions and their answers |
+| `!preguntas` | View recent daily questions and their answers |
 | `!faq` | View frequently asked questions |
 | `!tabla` | Group leaderboard |
 | `!puntos` | Your personal score and stats |
@@ -116,6 +141,7 @@ Configure the subjects for the current semester so users can propose homeworks o
 | `!borrar-recurso [id]` | Delete approved resource |
 | `!add-faq keyword1,keyword2 \| Question \| Answer` | Add an FAQ entry |
 | `!del-faq [id]` | Delete an FAQ entry |
+| `!add-pregunta easy\|normal\|hard \| Question \| Answer` | Add a question to the daily questions bank |
 | `!conf-premio Prize \| Points \| Sponsor` | Set the leaderboard prize |
 | `!mutear [@user] [minutes] [reason]` | Mute a user |
 | `!desmutear [@user]` | Unmute a user |
@@ -132,13 +158,15 @@ Configure the subjects for the current semester so users can propose homeworks o
 |---|---|
 | **Welcome message** | Sent to the group when a new member joins |
 | **Reminder notifications** | Sent to the group at 8:00 AM (Bogotá) on configured days before a deadline |
+| **"Due today" repeat reminders** | When `reminderTodayRepeat.enabled` is true, the same-day deadline alert is sent `times` times evenly spread between `startHour` and `endHour` |
 | **Weekly digest** | Sent on the configured weekday/hour with all deadlines for the next 7 days |
+| **Daily questions** | The bot automatically publishes `questionsPerDay` questions from the pool (`daily-questions.json`) spread throughout the day between `startHour` and `endHour` |
+| **Daily question scoring** | Quoting/replying to a daily question validates the answer by keyword similarity against the correct answer (25 % threshold). Awards variable points based on difficulty to the first correct answerer: 🟢 easy +2, 🟡 normal +3, 🔴 hard +4. Incorrect answers receive the correct answer as feedback. |
 | **Word warnings** | Bot warns in-group when a forbidden word is detected |
 | **Mute enforcement** | Muted users' messages are deleted and they receive a DM |
 | **Inactivity check** | Runs daily at 10:00 AM (Bogotá); warns after `warnAfterDays`, removes after an additional `removeAfterDays` |
 | **FAQ auto-reply** | When a group message contains a keyword matching an FAQ entry, the bot replies automatically |
 | **FAQ from reminders** | Adding a reminder via `!recordatorio` automatically creates an FAQ entry with keywords extracted from the title/description. Deleting the reminder removes its FAQ entries. |
-| **Anonymous answer scoring** | Replying (quote) to an anonymous question message in the group awards +2 points |
 
 ## Points system
 
@@ -150,8 +178,9 @@ Configure the subjects for the current semester so users can propose homeworks o
 | Notes proposed | +2 |
 | Resource approved | +2 |
 | Resource proposed | +1 |
-| Anonymous question answered | +2 |
-| Anonymous question asked | +1 |
+| Daily question answered — 🟢 Easy | +2 |
+| Daily question answered — 🟡 Normal | +3 |
+| Daily question answered — 🔴 Hard | +4 |
 | Reminder approved | +1 |
 
 ## License

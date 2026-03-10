@@ -1,6 +1,6 @@
 # StudyBot 🤖📚
 
-Bot de WhatsApp para grupos de estudio con recordatorios de entregas, seguimiento de tareas, compartir apuntes, compartir recursos, preguntas anónimas, moderación, FAQ y leaderboard. Construido con [whatsapp-web.js](https://github.com/pedroslopez/whatsapp-web.js).
+Bot de WhatsApp para grupos de estudio con recordatorios de entregas, seguimiento de tareas, compartir apuntes, compartir recursos, preguntas del día, moderación, FAQ y leaderboard. Construido con [whatsapp-web.js](https://github.com/pedroslopez/whatsapp-web.js).
 
 > La interfaz y los comandos del bot están en español. Ver [README.md](README.md) para la versión en inglés.
 
@@ -41,13 +41,14 @@ Toda la configuración vive en `config.json`. Ver `config.json.example` para la 
 | `prefix` | Carácter de prefijo para comandos (por defecto `"!"`) |
 | `subjects` | Lista de materias con alias y links de Drive (ver abajo) |
 | `reminderDays` | Días antes del vencimiento para enviar recordatorios (ej: `[4, 2, 0]`) |
+| `reminderTodayRepeat` | Repetición del recordatorio de "hoy es el día" (`enabled`, `times`, `startHour`, `endHour`) |
 | `weeklySummary` | Configuración del resumen semanal (día, hora, plantilla de mensaje) |
 | `messages` | Plantillas de notificación de recordatorios (4 días, 2 días, hoy) |
 | `wordWarnings` | Auto-advertencia por palabras prohibidas |
-| `mute` | Duraciones de silencio y plantillas de mensajes |
+| `mute` | Duraciones de silencio (`defaultMinutes`, `maxMinutes`) y plantillas de mensajes |
 | `welcome` | Mensaje de bienvenida para nuevos miembros |
-| `anonymous` | Configuración de preguntas anónimas (habilitado, plantillas de mensajes) |
-| `activityCheck` | Umbrales de advertencia y remoción por inactividad |
+| `dailyQuestions` | Preguntas del día (`enabled`, `questionsPerDay`, `startHour`, `endHour`, `message`) |
+| `activityCheck` | Umbrales de advertencia y remoción por inactividad (`warnAfterDays`, `removeAfterDays`) |
 
 ### Materias (`config.subjects`)
 
@@ -68,6 +69,32 @@ Configurá las materias del cuatrimestre para que los usuarios puedan proponer t
 - `aliases` — variantes aceptadas (sin distinguir mayúsculas/minúsculas)
 - `driveFolder` — URL de Google Drive que se autocompleta cuando un usuario propone una tarea
 - `notesFolder` — URL de Google Drive que se autocompleta cuando un usuario propone apuntes
+
+### Banco de preguntas del día (`data/daily-questions.json`)
+
+Cada entrada del banco es un objeto con la pregunta, su respuesta de referencia y la dificultad:
+
+```json
+[
+  {
+    "question": "¿Cuál es la diferencia entre un arreglo y una lista enlazada?",
+    "answer": "Un arreglo almacena elementos contiguos en memoria con acceso por índice en O(1), mientras que una lista enlazada usa nodos con punteros.",
+    "difficulty": "normal"
+  }
+]
+```
+
+- `question` — texto de la pregunta que el bot publicará en el grupo
+- `answer` — respuesta correcta de referencia usada para validar las respuestas de los usuarios
+- `difficulty` — nivel de dificultad: `easy`, `normal` o `hard`
+
+| Dificultad | Puntos |
+|---|---|
+| `easy` (🟢 Fácil) | +2 |
+| `normal` (🟡 Normal) | +3 |
+| `hard` (🔴 Difícil) | +4 |
+
+Cuando el bot publica una pregunta la elimina del banco. Las respuestas de los usuarios se validan por similitud de palabras clave contra `answer` (umbral 25 %). También podés agregar preguntas desde el chat con `!add-pregunta` sin necesidad de editar el archivo directamente.
 
 ## Comandos
 
@@ -93,9 +120,7 @@ Configurá las materias del cuatrimestre para que los usuarios puedan proponer t
 | `!ver-recurso` / `!vrc` `[n]` | Ver el detalle completo del recurso número N |
 | `!buscar-recurso` / `!brc` `[consulta]` | Buscar recursos por tipo, título o descripción |
 | `!proponer-recurso` / `!prc` `tipo \| título \| desc \| link` | Proponer un recurso para revisión de un admin *(tipos sugeridos: video, pdf, libro, herramienta, guía, enlace, ejercicios, otro)* |
-| `!pregunta [texto]` | Enviar una pregunta anónima al grupo *(solo desde privado)* |
-| *(responder citando el mensaje de la pregunta)* | Responder una pregunta anónima y ganar puntos |
-| `!preguntas` | Ver preguntas anónimas recientes con sus respuestas |
+| `!preguntas` | Ver preguntas del día recientes con sus respuestas |
 | `!faq` | Ver preguntas frecuentes |
 | `!tabla` | Leaderboard del grupo |
 | `!puntos` | Tu puntaje personal y estadísticas |
@@ -115,6 +140,7 @@ Configurá las materias del cuatrimestre para que los usuarios puedan proponer t
 | `!borrar-recurso [id]` | Eliminar un recurso aprobado |
 | `!add-faq keyword1,keyword2 \| Pregunta \| Respuesta` | Agregar una entrada de FAQ |
 | `!del-faq [id]` | Eliminar una entrada de FAQ |
+| `!add-pregunta fácil\|normal\|difícil \| Pregunta \| Respuesta` | Agregar una pregunta al banco de preguntas del día |
 | `!conf-premio Premio \| Puntos \| Patrocinador` | Configurar el premio del leaderboard |
 | `!mutear [@usuario] [minutos] [motivo]` | Silenciar un usuario |
 | `!desmutear [@usuario]` | Desilenciar un usuario |
@@ -131,13 +157,15 @@ Configurá las materias del cuatrimestre para que los usuarios puedan proponer t
 |---|---|
 | **Mensaje de bienvenida** | Se envía al grupo cuando se une un nuevo miembro |
 | **Notificaciones de recordatorio** | Se envían al grupo a las 8:00 AM (Bogotá) en los días configurados antes de un vencimiento |
+| **Recordatorio de "hoy es el día"** | Si `reminderTodayRepeat.enabled` está activo, el aviso de entrega para el mismo día se repite `times` veces distribuidas entre `startHour` y `endHour` |
 | **Resumen semanal** | Se envía el día/hora configurados con todas las entregas de los próximos 7 días |
+| **Preguntas del día** | El bot publica automáticamente `questionsPerDay` preguntas del banco (`daily-questions.json`) distribuidas a lo largo del día entre `startHour` y `endHour` |
+| **Respuesta a pregunta del día** | Responder (citando) el mensaje de una pregunta del día compara la respuesta contra la respuesta correcta almacenada usando similitud de palabras clave. Si supera el umbral, otorga +2 puntos al primero en responder correctamente. Respuestas incorrectas reciben la respuesta correcta como guía. Respuestas adicionales válidas se guardan como aportes extra sin puntos. |
 | **Advertencias de palabras** | El bot advierte en el grupo si detecta una palabra prohibida |
 | **Aplicación del silencio** | Los mensajes de usuarios silenciados son eliminados y reciben un aviso por privado |
 | **Revisión de inactividad** | Se ejecuta diariamente a las 10:00 AM (Bogotá); advierte tras `warnAfterDays` días y remueve tras `removeAfterDays` días adicionales |
 | **Auto-respuesta de FAQ** | Cuando un mensaje del grupo contiene una palabra clave que coincide con una entrada de FAQ, el bot responde automáticamente |
 | **FAQ desde recordatorios** | Al agregar un recordatorio con `!recordatorio`, se crea automáticamente una entrada de FAQ con palabras clave extraídas del título y descripción. Al borrar el recordatorio, también se eliminan sus FAQs. |
-| **Puntos por responder preguntas** | Responder (citando) el mensaje de una pregunta anónima en el grupo otorga +2 puntos |
 
 ## Sistema de puntos
 
@@ -149,8 +177,9 @@ Configurá las materias del cuatrimestre para que los usuarios puedan proponer t
 | Apunte propuesto | +2 |
 | Recurso aprobado | +2 |
 | Recurso propuesto | +1 |
-| Pregunta anónima respondida | +2 |
-| Pregunta anónima enviada | +1 |
+| Pregunta del día respondida — 🟢 Fácil | +2 |
+| Pregunta del día respondida — 🟡 Normal | +3 |
+| Pregunta del día respondida — 🔴 Difícil | +4 |
 | Recordatorio aprobado | +1 |
 
 ## Licencia

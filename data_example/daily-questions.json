@@ -1,8 +1,32 @@
 [
-  "En pocas palabras, ¿qué es un algoritmo?",
-  "¿Cuál era el apellido de los gemelos que mataron a Santiago Nasar?",
-  "¿Existen infinitos más grandes que otros?, De un ejemplo.",
-  "¿Quién es el protagonista que muere en la novela?",
-  "¿Por qué los hermanos Vicario deciden matar a Santiago Nasar?",
-  "Si todos los A son B, y todos los B son C, ¿todos los A son C?"
+  {
+    "question": "En pocas palabras, ¿qué es un algoritmo?",
+    "answer": "Un algoritmo es una secuencia finita de pasos o instrucciones bien definidas que resuelven un problema o realizan una tarea.",
+    "difficulty": "easy"
+  },
+  {
+    "question": "¿Cuál era el apellido de los gemelos que mataron a Santiago Nasar?",
+    "answer": "El apellido de los gemelos era Vicario. Pedro y Pablo Vicario.",
+    "difficulty": "easy"
+  },
+  {
+    "question": "¿Existen infinitos más grandes que otros? Da un ejemplo.",
+    "answer": "Sí. Georg Cantor demostró que hay infinitos de distinto tamaño. Por ejemplo, el infinito de los números reales es estrictamente mayor que el de los naturales (no son numerables).",
+    "difficulty": "hard"
+  },
+  {
+    "question": "¿Quién es el protagonista que muere en la novela Crónica de una muerte anunciada?",
+    "answer": "El protagonista que muere es Santiago Nasar.",
+    "difficulty": "easy"
+  },
+  {
+    "question": "¿Por qué los hermanos Vicario deciden matar a Santiago Nasar?",
+    "answer": "Los hermanos Vicario matan a Santiago Nasar para lavar el honor de su hermana Ángela Vicario, quien fue devuelta por su esposo Bayardo San Román al afirmar que no era virgen, y señaló a Santiago como el responsable.",
+    "difficulty": "normal"
+  },
+  {
+    "question": "Si todos los A son B, y todos los B son C, ¿todos los A son C?",
+    "answer": "Sí, por la propiedad transitiva del silogismo lógico: si A ⊆ B y B ⊆ C, entonces A ⊆ C.",
+    "difficulty": "normal"
+  }
 ]
