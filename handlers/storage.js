@@ -32,7 +32,7 @@ function read(key) {
     return def;
   }
   try { return JSON.parse(fs.readFileSync(file, 'utf-8')); }
-  catch { return (key === 'stats' || key === 'prize') ? {} : []; }
+  catch { return (key === 'stats' || key === 'activity' || key === 'prize') ? {} : []; }
 }
 
 function write(key, data) {
@@ -46,7 +46,12 @@ function genId() {
 // ─── Reminders ────────────────────────────────────────────────────────────────
 
 const getReminders     = ()       => read('reminders');
-const deleteReminder   = (id)     => write('reminders', getReminders().filter(r => r.id !== id));
+function deleteReminder(id) {
+  const list = getReminders();
+  const filtered = list.filter(r => r.id !== id);
+  write('reminders', filtered);
+  return filtered.length < list.length;
+}
 const getActiveReminders = ()     => {
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
   return getReminders().filter(r => r.date >= todayStr);
@@ -62,7 +67,12 @@ function saveReminder(data) {
 // ─── Pending reminders (sugerencias esperando aprobación) ─────────────────────
 
 const getPendingReminders    = ()    => read('pendingReminders');
-const deletePendingReminder  = (id)  => write('pendingReminders', getPendingReminders().filter(p => p.id !== id));
+function deletePendingReminder(id) {
+  const list = getPendingReminders();
+  const filtered = list.filter(p => p.id !== id);
+  write('pendingReminders', filtered);
+  return filtered.length < list.length;
+}
 function savePendingReminder(data) {
   const list = getPendingReminders();
   const entry = { id: genId(), ...data, suggestedAt: new Date().toISOString() };
@@ -74,15 +84,12 @@ function savePendingReminder(data) {
 
 
 const getHomework    = ()       => read('homework');
-const deleteHomework = (id)     => write('homework', getHomework().filter(h => h.id !== id));
-const searchHomework = (query)  => {
-  const q = query.toLowerCase();
-  return getHomework().filter(h =>
-    h.subject.toLowerCase().includes(q) ||
-    h.title.toLowerCase().includes(q) ||
-    (h.description||'').toLowerCase().includes(q)
-  );
-};
+function deleteHomework(id) {
+  const list = getHomework();
+  const filtered = list.filter(h => h.id !== id);
+  write('homework', filtered);
+  return filtered.length < list.length;
+}
 function saveHomework(data) {
   const list = getHomework();
   const entry = { id: genId(), ...data, savedAt: new Date().toISOString() };
@@ -94,7 +101,12 @@ function saveHomework(data) {
 // ─── Pending (propuestas esperando aprobación) ────────────────────────────────
 
 const getPending    = ()    => read('pending');
-const deletePending = (id)  => write('pending', getPending().filter(p => p.id !== id));
+function deletePending(id) {
+  const list = getPending();
+  const filtered = list.filter(p => p.id !== id);
+  write('pending', filtered);
+  return filtered.length < list.length;
+}
 function savePending(data) {
   const list = getPending();
   const entry = { id: genId(), ...data, proposedAt: new Date().toISOString(), status: 'pending' };
@@ -106,15 +118,12 @@ function savePending(data) {
 // ─── Resources (recursos aprobados) ──────────────────────────────────────────
 
 const getResources    = ()       => read('resources');
-const deleteResource  = (id)     => write('resources', getResources().filter(r => r.id !== id));
-const searchResources = (query)  => {
-  const q = query.toLowerCase();
-  return getResources().filter(r =>
-    r.type.toLowerCase().includes(q) ||
-    r.title.toLowerCase().includes(q) ||
-    (r.description || '').toLowerCase().includes(q)
-  );
-};
+function deleteResource(id) {
+  const list = getResources();
+  const filtered = list.filter(r => r.id !== id);
+  write('resources', filtered);
+  return filtered.length < list.length;
+}
 function saveResource(data) {
   const list = getResources();
   const entry = { id: genId(), ...data, savedAt: new Date().toISOString() };
@@ -126,7 +135,12 @@ function saveResource(data) {
 // ─── Pending resources (recursos propuestos esperando aprobación) ─────────────
 
 const getPendingResources    = ()    => read('pendingResources');
-const deletePendingResource  = (id)  => write('pendingResources', getPendingResources().filter(p => p.id !== id));
+function deletePendingResource(id) {
+  const list = getPendingResources();
+  const filtered = list.filter(p => p.id !== id);
+  write('pendingResources', filtered);
+  return filtered.length < list.length;
+}
 function savePendingResource(data) {
   const list = getPendingResources();
   const entry = { id: genId(), ...data, proposedAt: new Date().toISOString(), status: 'pending' };
@@ -138,15 +152,12 @@ function savePendingResource(data) {
 // ─── Notes (apuntes aprobados) ────────────────────────────────────────────────
 
 const getNotes    = ()       => read('notes');
-const deleteNote  = (id)     => write('notes', getNotes().filter(n => n.id !== id));
-const searchNotes = (query)  => {
-  const q = query.toLowerCase();
-  return getNotes().filter(n =>
-    n.subject.toLowerCase().includes(q) ||
-    n.title.toLowerCase().includes(q) ||
-    (n.description || '').toLowerCase().includes(q)
-  );
-};
+function deleteNote(id) {
+  const list = getNotes();
+  const filtered = list.filter(n => n.id !== id);
+  write('notes', filtered);
+  return filtered.length < list.length;
+}
 function saveNote(data) {
   const list = getNotes();
   const entry = { id: genId(), ...data, savedAt: new Date().toISOString() };
@@ -158,7 +169,12 @@ function saveNote(data) {
 // ─── Pending notes (apuntes propuestos esperando aprobación) ──────────────────
 
 const getPendingNotes    = ()    => read('pendingNotes');
-const deletePendingNote  = (id)  => write('pendingNotes', getPendingNotes().filter(p => p.id !== id));
+function deletePendingNote(id) {
+  const list = getPendingNotes();
+  const filtered = list.filter(p => p.id !== id);
+  write('pendingNotes', filtered);
+  return filtered.length < list.length;
+}
 function savePendingNote(data) {
   const list = getPendingNotes();
   const entry = { id: genId(), ...data, proposedAt: new Date().toISOString(), status: 'pending' };
@@ -186,7 +202,12 @@ function extractKeywords(title, description) {
 }
 
 const getFaqs    = ()    => read('faqs');
-const deleteFaq  = (id)  => write('faqs', getFaqs().filter(f => f.id !== id));
+function deleteFaq(id) {
+  const list = getFaqs();
+  const filtered = list.filter(f => f.id !== id);
+  write('faqs', filtered);
+  return filtered.length < list.length;
+}
 
 /** Returns only FAQs that are currently relevant:
  *  - Admin-added FAQs (no reminderId) are always included.
@@ -332,18 +353,19 @@ function muteUser(number, name, minutes, reason, mutedBy) {
 }
 
 function unmuteUser(number) {
-  const before = getMuted().length;
-  write('muted', getMuted().filter(m => m.number !== number));
-  return before > getMuted().length + before - getMuted().length; // siempre true si había
+  const list = getMuted();
+  const filtered = list.filter(m => m.number !== number);
+  write('muted', filtered);
+  return filtered.length < list.length;
 }
 
 function isMuted(number) {
   const now = new Date();
-  const entry = getMuted().find(m => m.number === number);
+  const list = getMuted();
+  const entry = list.find(m => m.number === number);
   if (!entry) return null;
   if (new Date(entry.until) <= now) {
-    // Expiró: limpiar automáticamente
-    write('muted', getMuted().filter(m => m.number !== number));
+    write('muted', list.filter(m => m.number !== number));
     return null;
   }
   return entry;
@@ -444,15 +466,15 @@ module.exports = {
   // pending reminders
   getPendingReminders, savePendingReminder, deletePendingReminder,
   // homework
-  getHomework, saveHomework, deleteHomework, searchHomework,
+  getHomework, saveHomework, deleteHomework,
   // pending homework
   getPending, savePending, deletePending,
   // notes
-  getNotes, saveNote, deleteNote, searchNotes,
+  getNotes, saveNote, deleteNote,
   // pending notes
   getPendingNotes, savePendingNote, deletePendingNote,
   // resources
-  getResources, saveResource, deleteResource, searchResources,
+  getResources, saveResource, deleteResource,
   // pending resources
   getPendingResources, savePendingResource, deletePendingResource,
   // faq

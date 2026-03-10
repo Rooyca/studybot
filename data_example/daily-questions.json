@@ -1,5 +1,35 @@
 [
   {
+    "question": "¿Cuál es el resultado de la operación matemática 5 + 3 × 2?",
+    "answer": "11",
+    "difficulty": "easy"
+  },
+  {
+    "question": "¿Qué se obtiene al calcular la raíz cuadrada de 16 y luego elevar el resultado al cuadrado, es decir, (√16)²?",
+    "answer": "16",
+    "difficulty": "easy"
+  },
+  {
+    "question": "Si en una carrera de atletismo logras adelantar a la persona que va en el segundo lugar, ¿en qué posición quedas tú?",
+    "answer": "en segundo lugar",
+    "difficulty": "easy"
+  },
+  {
+    "question": "Premisa 1: Algunos perros son blancos. Premisa 2: Todos los animales blancos son veloces. ¿Se puede deducir lógicamente que todos los perros son veloces?",
+    "answer": "Solo se puede deducir que los perros que son blancos son veloces.",
+    "difficulty": "normal"
+  },
+  {
+    "question": "En la novela 'Crónica de una muerte anunciada', ¿cuál es la actitud general del pueblo frente al inminente asesinato de Santiago Nasar?",
+    "answer": "La actitud es de complicidad pasiva. Casi todo el pueblo sabía que los hermanos Vicario iban a matarlo, pero por una mezcla de incredulidad, fatalismo, casualidades y prejuicios sociales, nadie logra advertirle o evitar el crimen.",
+    "difficulty": "normal"
+  },
+  {
+    "question": "¿Qué sucede en una potencia si la base es un número negativo y el exponente es un número par?",
+    "answer": "El resultado siempre será un número positivo.",
+    "difficulty": "normal"
+  },
+  {
     "question": "En pocas palabras, ¿qué es un algoritmo?",
     "answer": "Un algoritmo es una secuencia finita de pasos o instrucciones bien definidas que resuelven un problema o realizan una tarea.",
     "difficulty": "easy"
@@ -11,7 +41,7 @@
   },
   {
     "question": "¿Existen infinitos más grandes que otros? Da un ejemplo.",
-    "answer": "Sí. Georg Cantor demostró que hay infinitos de distinto tamaño. Por ejemplo, el infinito de los números reales es estrictamente mayor que el de los naturales (no son numerables).",
+    "answer": "Sí, hay infinitos de distinto tamaño. Por ejemplo, el infinito de los números reales es estrictamente mayor que el de los naturales.",
     "difficulty": "hard"
   },
   {
@@ -26,7 +56,7 @@
   },
   {
     "question": "Si todos los A son B, y todos los B son C, ¿todos los A son C?",
-    "answer": "Sí, por la propiedad transitiva del silogismo lógico: si A ⊆ B y B ⊆ C, entonces A ⊆ C.",
+    "answer": "Sí, es corecto",
     "difficulty": "normal"
   }
 ]

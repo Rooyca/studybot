@@ -106,7 +106,7 @@ async function processAnswer(msg, responderNumber, responderName, answerText) {
   const question = getQuestions().find(q => q.groupMsgId === quoted.id._serialized);
   if (!question) return { status: 'not_a_question' };
 
-  if (answerText.trim().length <= 5) {
+  if (answerText.trim().length <= 1) {
     return { status: 'incoherent', reason: 'Escribe algo más elaborado.', question: question.question };
   }
 
@@ -149,7 +149,7 @@ async function processAnswer(msg, responderNumber, responderName, answerText) {
 /**
  * Builds the recent daily-questions list with their answers and difficulty.
  */
-function buildQuestionsList(limit = 10) {
+function buildQuestionsList(limit = 5) {
   const questions = getQuestions().slice(-limit).reverse();
 
   if (!questions.length) return '🤔 No hay preguntas del día registradas todavía.';

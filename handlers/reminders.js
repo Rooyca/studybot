@@ -162,4 +162,4 @@ function parseReminderCommand(args) {
   return { title, date: dateStr, description };
 }
 
-module.exports = { startCrons, checkAndSendReminders, checkAndSendTodayReminders, sendWeeklySummary, parseReminderCommand, formatDate, daysDiff, todayBogota };
+module.exports = { startCrons, checkAndSendReminders, checkAndSendTodayReminders, sendWeeklySummary, parseReminderCommand, formatDate, daysDiff };

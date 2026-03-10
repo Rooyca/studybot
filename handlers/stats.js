@@ -21,9 +21,7 @@ function buildLeaderboard(limit = 5) {
     const bar   = buildBar(pts);
     return (
       `${medal} *${user.name || user.number}*\n` +
-      `${bar} ${pts} pts\n` +
-      `💬 Respuestas: ${user.questionsAnswered}\n` +
-      `📚 Tareas: ${user.tasksApproved}`
+      `${bar} ${pts} pts`
     );
   });
 

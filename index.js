@@ -76,6 +76,8 @@ function resolveSubject(input) {
   return null;
 }
 
+const pfx = config.prefix || '!';
+
 const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: { args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'] },
@@ -233,14 +235,14 @@ client.on('message', async msg => {
     const body    = msg.body?.trim() || '';
     const chat    = await msg.getChat();
     const isGroup = chat.isGroup;
-    const pfx     = config.prefix || '!';
 
     // ── Track activity (solo en grupos) ─────────────────────────────────────
     if (isGroup) storage.updateLastSeen(number, name);
 
     // ── Moderación (solo en grupos) ──────────────────────────────────────────
     if (isGroup && !body.startsWith(pfx)) {
-      await runModeration(msg, config);
+      const wasMuted = await runModeration(msg, config);
+      if (wasMuted) return;
 
       // ── Respuesta a pregunta del día (reply sin comando) ─────────────────────
       if (msg.hasQuotedMsg && body.length > 5) {
@@ -282,6 +284,13 @@ client.on('message', async msg => {
             );
             break;
         }
+        if (result.status !== 'not_a_question') return;
+      }
+
+      // ── FAQ auto-responder ───────────────────────────────────────────────────
+      const faq = storage.matchFaq(body);
+      if (faq) {
+        await msg.reply(`❓ *${faq.question}*\n\n${faq.answer}\n\n_Respuesta automática. Usa \`!faq\` para ver todas las preguntas frecuentes._`);
       }
 
       return;
@@ -410,13 +419,12 @@ client.on('message', async msg => {
     if (cmd === 'borrar-recordatorio') {
       if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
       if (!args) { await reply(msg, '❌ Uso: `!borrar-recordatorio [id]`'); return; }
-      const before = storage.getReminders().length;
       const remId = args.trim();
-      storage.deleteReminder(remId);
+      const deleted = storage.deleteReminder(remId);
       storage.deleteFaqsByReminderId(remId);
-      await reply(msg, before > storage.getReminders().length
+      await reply(msg, deleted
         ? `🗑️ Recordatorio eliminado.`
-        : `❌ No encontré el ID \`${args.trim()}\``
+        : `❌ No encontré el ID \`${remId}\``
       );
       return;
     }
@@ -747,9 +755,8 @@ client.on('message', async msg => {
     if (cmd === 'borrar-tarea') {
       if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
       if (!args) { await reply(msg, '❌ Uso: `!borrar-tarea [id]`'); return; }
-      const before = storage.getHomework().length;
-      storage.deleteHomework(args.trim());
-      await reply(msg, before > storage.getHomework().length
+      const deleted = storage.deleteHomework(args.trim());
+      await reply(msg, deleted
         ? '🗑️ Tarea eliminada.'
         : `❌ No encontré el ID \`${args.trim()}\``
       );
@@ -850,9 +857,8 @@ client.on('message', async msg => {
     if (cmd === 'borrar-apuntes') {
       if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
       if (!args) { await reply(msg, '❌ Uso: `!borrar-apuntes [id]`'); return; }
-      const before = storage.getNotes().length;
-      storage.deleteNote(args.trim());
-      await reply(msg, before > storage.getNotes().length
+      const deleted = storage.deleteNote(args.trim());
+      await reply(msg, deleted
         ? '🗑️ Apuntes eliminados.'
         : `❌ No encontré el ID \`${args.trim()}\``
       );
@@ -955,9 +961,8 @@ client.on('message', async msg => {
     if (cmd === 'borrar-recurso') {
       if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
       if (!args) { await reply(msg, '❌ Uso: `!borrar-recurso [id]`'); return; }
-      const before = storage.getResources().length;
-      storage.deleteResource(args.trim());
-      await reply(msg, before > storage.getResources().length
+      const deleted = storage.deleteResource(args.trim());
+      await reply(msg, deleted
         ? '🗑️ Recurso eliminado.'
         : `❌ No encontré el ID \`${args.trim()}\``
       );
@@ -1014,9 +1019,8 @@ client.on('message', async msg => {
     if (cmd === 'del-faq') {
       if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
       if (!args) { await reply(msg, '❌ Uso: `!del-faq [id]`'); return; }
-      const before = storage.getFaqs().length;
-      storage.deleteFaq(args.trim());
-      await reply(msg, before > storage.getFaqs().length ? '🗑️ FAQ eliminada.' : `❌ No encontré el ID \`${args.trim()}\``);
+      const deleted = storage.deleteFaq(args.trim());
+      await reply(msg, deleted ? '🗑️ FAQ eliminada.' : `❌ No encontré el ID \`${args.trim()}\``);
       return;
     }
 
@@ -1187,7 +1191,6 @@ client.on('message', async msg => {
       if (!targetNum) { await reply(msg, '❌ Uso: `!desmutear @usuario`'); return; }
 
       storage.unmuteUser(targetNum);
-      const unmuteMsg = config.mute.unmuteMessage.replace('{user}', targetNum);
       await reply(msg, `🔊 *Usuario desmuteado*\n\n👤 +${targetNum} puede volver a escribir en el grupo.`);
 
       try {
@@ -1278,8 +1281,7 @@ client.on('message', async msg => {
       if (!args) { await reply(msg, '❌ Uso: `!todos [mensaje]`\n\nEjemplo: `!todos Recuerden entregar el TP antes del viernes.`'); return; }
       if (!isGroup) { await reply(msg, '⚠️ Este comando solo funciona desde el grupo.'); return; }
 
-      const groupChat = await msg.getChat();
-      const participants = groupChat.participants || [];
+      const participants = chat.participants || [];
       const nonAdminParticipants = participants.filter(p => {
         const pNum = p.id.user;
         return !isAdmin(pNum) && pNum !== client.info.wid.user;
@@ -1310,23 +1312,6 @@ client.on('message', async msg => {
 
   } catch (err) {
     console.error('[ERROR]', err);
-  }
-});
-
-// ─── FAQ auto-responder (mensajes normales en grupo) ──────────────────────────
-
-client.on('message', async msg => {
-  try {
-    const body = msg.body?.trim() || '';
-    const chat = await msg.getChat();
-    if (!chat.isGroup || body.startsWith(config.prefix)) return;
-
-    const faq = storage.matchFaq(body);
-    if (faq) {
-      await msg.reply(`❓ *${faq.question}*\n\n${faq.answer}\n\n_Respuesta automática. Usa \`!faq\` para ver todas las preguntas frecuentes._`);
-    }
-  } catch (e) {
-    // Ignorar errores del auto-responder
   }
 });
 

@@ -2,6 +2,15 @@
 
 const { isMuted, cleanExpiredMutes, log } = require('./storage');
 
+let _wordRegexes = null;
+
+function getWordRegexes(words) {
+  if (!_wordRegexes) {
+    _wordRegexes = words.map(w => ({ word: w, re: new RegExp(`\\b${w.toLowerCase()}\\b`, 'i') }));
+  }
+  return _wordRegexes;
+}
+
 /**
  * Formatea hora "HH:MM" desde un ISO string
  */
@@ -18,17 +27,43 @@ async function handleMutedMessage(msg, config) {
   const muteEntry = isMuted(contact.number);
   if (!muteEntry) return false;
 
-  // Eliminar mensaje (solo si el bot es admin)
+  // Eliminar mensaje (solo si el bot es admin en el grupo)
   try {
-    await msg.delete(true); // true = borrar para todos
+    // msg.delete(true) puede fallar silenciosamente si canAdminRevokeMsg()
+    // devuelve false porque el store del grupo aún no está cargado en caché.
+    // Llamamos sendRevokeMsgs directamente para forzar la revocación como admin.
+    const revoked = await msg.client.pupPage.evaluate(async (msgId) => {
+      const message = window.Store.Msg.get(msgId)
+        || (await window.Store.Msg.getMessagesById([msgId]))?.messages?.[0];
+      if (!message) return false;
+      const chat = window.Store.Chat.get(message.id.remote)
+        || (await window.Store.Chat.find(message.id.remote));
+      if (!chat) return false;
+      try {
+        if (window.compareWwebVersions(window.Debug.VERSION, '>=', '2.3000.0')) {
+          await window.Store.Cmd.sendRevokeMsgs(
+            chat, { list: [message], type: 'message' }, { clearMedia: true }
+          );
+        } else {
+          await window.Store.Cmd.sendRevokeMsgs(
+            chat, [message], { clearMedia: true, type: 'Admin' }
+          );
+        }
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }, msg.id._serialized);
+
+    if (!revoked) {
+      console.warn('[MUTE] No se pudo revocar el mensaje (¿el bot es admin del grupo?)');
+    }
   } catch (err) {
-    // No era admin o no pudo borrar — igual se avisa
-    console.warn('[MUTE] No se pudo borrar mensaje:', err.message);
+    console.warn('[MUTE] Error al borrar mensaje:', err.message);
   }
 
   // Avisar al usuario en privado
   try {
-    const chat = await msg.getChat();
     const warningText = config.mute.deletedMessage
       .replace('{until}', formatTime(muteEntry.until));
     await contact.sendMessage(warningText);
@@ -47,10 +82,9 @@ async function handleMutedMessage(msg, config) {
 async function handleWordWarning(msg, config) {
   if (!config.wordWarnings.enabled) return false;
   const text = (msg.body || '').toLowerCase();
-  const found = config.wordWarnings.words.find(w =>
-    new RegExp(`\\b${w.toLowerCase()}\\b`, 'i').test(text)
-  );
-  if (!found) return false;
+  const match = getWordRegexes(config.wordWarnings.words).find(({ re }) => re.test(text));
+  if (!match) return false;
+  const found = match.word;
 
   const contact = await msg.getContact();
   const userName = contact.pushname || contact.number;
