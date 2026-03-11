@@ -244,6 +244,9 @@ _(agrega al banco; se publicará automáticamente según el horario configurado)
 \`!desmutear <id|número>\`
 \`!muteados\`
 
+⚙️ *Configuración*
+\`!conf\` — Ver configuración actual del bot
+
 🔧 *Pruebas*
 \`!test-recordatorios\`
 \`!resumen-semanal\`
@@ -1130,7 +1133,7 @@ client.on('message', async msg => {
           `🏆 Premio: *${prize.prize}*\n` +
           `🎯 Meta: *${prize.points} puntos*\n` +
           `🤝 Patrocinado por: *${prize.sponsor}*\n\n` +
-          `_¡Acumula puntos proponiendo tareas/recordatorios/apuntes y respondiendo preguntas anónimas!_`
+          `_¡Acumula puntos proponiendo tareas/recordatorios/apuntes y respondiendo preguntas!_`
         );
       }
       return;
@@ -1417,6 +1420,63 @@ client.on('message', async msg => {
 
       await reply(msg, `✅ Mensaje enviado a ${sent} miembro(s)${failed > 0 ? ` (${failed} fallaron — pueden tener el chat privado cerrado)` : ''}.`);
       storage.log('broadcast', { by: number, message: args, sent, failed });
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !conf (ADMIN) — Muestra la configuración actual del bot
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'conf') {
+      if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
+
+      const dq = config.dailyQuestions || {};
+      const rem = config.reminderTodayRepeat || {};
+      const ws = config.weeklySummary || {};
+      const ww = config.wordWarnings || {};
+      const mute = config.mute || {};
+      const ac = config.activityCheck || {};
+      const welcome = config.welcome || {};
+
+      const lines = [
+        `⚙️ *Configuración del bot*`,
+        ``,
+        `👥 *Admins:* ${(config.admins || []).map(a => `+${a}`).join(', ') || '—'}`,
+        `🔑 *Prefijo:* \`${config.prefix || '!'}\``,
+        ``,
+        `🤔 *Preguntas del día*`,
+        `• Habilitadas: ${dq.enabled ? '✅' : '❌'}`,
+        `• Por día: ${dq.questionsPerDay ?? '—'}`,
+        `• Horario: ${dq.startHour ?? '—'}:00 – ${dq.endHour ?? '—'}:00`,
+        ``,
+        `📅 *Recordatorios*`,
+        `• Días de anticipación: ${(config.reminderDays || []).join(', ')}`,
+        `• Repetición en el día: ${rem.enabled ? `✅ (${rem.times}x, ${rem.startHour}:00–${rem.endHour}:00)` : '❌'}`,
+        ``,
+        `📋 *Resumen semanal*`,
+        `• Habilitado: ${ws.enabled ? '✅' : '❌'}`,
+        `• Día: ${ws.dayOfWeek ?? '—'} (0=dom … 6=sáb)  Hora: ${ws.hour ?? '—'}:00`,
+        ``,
+        `🔇 *Moderación / Mute*`,
+        `• Duración por defecto: ${mute.defaultMinutes ?? '—'} min`,
+        `• Duración máxima: ${mute.maxMinutes ?? '—'} min`,
+        ``,
+        `🚨 *Palabras monitoreadas*`,
+        `• Habilitadas: ${ww.enabled ? '✅' : '❌'}`,
+        `• Palabras: ${(ww.words || []).length ? (ww.words || []).join(', ') : '—'}`,
+        ``,
+        `📊 *Revisión de inactividad*`,
+        `• Habilitada: ${ac.enabled ? '✅' : '❌'}`,
+        `• Advertencia tras: ${ac.warnAfterDays ?? '—'} días`,
+        `• Remoción tras: ${ac.removeAfterDays ?? '—'} días`,
+        ``,
+        `👋 *Bienvenida*`,
+        `• Habilitada: ${welcome.enabled ? '✅' : '❌'}`,
+        ``,
+        `📚 *Materias configuradas:* ${(config.subjects || []).length}`,
+        `❓ *FAQs activas:* ${(config.faq || []).length}`,
+      ];
+
+      await reply(msg, lines.join('\n'));
       return;
     }
 
