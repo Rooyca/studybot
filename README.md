@@ -50,6 +50,14 @@ Toda la configuración vive en `config.json`. Ver `config.json.example` para la 
 | `dailyQuestions` | Preguntas del día (`enabled`, `questionsPerDay`, `startHour`, `endHour`, `message`) |
 | `activityCheck` | Umbrales de advertencia y remoción por inactividad (`warnAfterDays`, `removeAfterDays`) |
 
+### Validación de respuestas con IA (opcional)
+
+Configurá la variable de entorno `GROQ_API_KEY` para habilitar la validación semántica de respuestas a las preguntas del día usando el modelo **Groq llama-3.3-70b**. Sin esta clave, el bot usa similitud de palabras clave (umbral 25 %) como respaldo.
+
+```bash
+export GROQ_API_KEY=tu_clave_de_groq_aqui
+```
+
 ### Materias (`config.subjects`)
 
 Configurá las materias del cuatrimestre para que los usuarios puedan proponer tareas o apuntes sin necesidad de pegar un link de Drive manualmente. El bot normaliza variantes del nombre de la materia (alias) y autocompleta el link de Drive.
@@ -123,8 +131,10 @@ Cuando el bot publica una pregunta la elimina del banco. Las respuestas de los u
 | `!preguntas` | Ver preguntas del día recientes con sus respuestas |
 | `!faq` | Ver preguntas frecuentes |
 | `!tabla` | Leaderboard del grupo |
-| `!puntos` | Tu puntaje personal y estadísticas |
+| `!puntos` / `!puntos @user` | Tu puntaje personal y estadísticas, o las de otro usuario |
+| `!donar-puntos` `@usuario N` | Donar N de tus puntos de bonus a otro usuario |
 | `!premio` | Ver el premio actual del leaderboard |
+| `!conf` | Ver la configuración actual del bot |
 
 ### Admin
 
@@ -132,7 +142,7 @@ Cuando el bot publica una pregunta la elimina del banco. Las respuestas de los u
 |---|---|
 | `!recordatorio "Título" YYYY-MM-DD [desc]` | Agregar un recordatorio directamente (sin revisión) |
 | `!borrar-recordatorio [id]` | Eliminar un recordatorio |
-| `!pendientes` | Ver **todas** las propuestas pendientes — tareas, apuntes y recordatorios — en un solo lugar |
+| `!pendientes` | Ver **todas** las propuestas pendientes — tareas, apuntes, recursos y recordatorios — en un solo lugar |
 | `!aprobar [id]` | Aprobar cualquier propuesta pendiente (tarea, apuntes o recordatorio) |
 | `!rechazar [id] [motivo]` | Rechazar cualquier propuesta con un motivo opcional |
 | `!borrar-tarea [id]` | Eliminar una tarea aprobada |
@@ -141,9 +151,10 @@ Cuando el bot publica una pregunta la elimina del banco. Las respuestas de los u
 | `!add-faq keyword1,keyword2 \| Pregunta \| Respuesta` | Agregar una entrada de FAQ |
 | `!del-faq [id]` | Eliminar una entrada de FAQ |
 | `!add-pregunta fácil\|normal\|difícil \| Pregunta \| Respuesta` | Agregar una pregunta al banco de preguntas del día |
+| `!publicar-pregunta` / `!pq` | Publicar una pregunta aleatoria del banco de forma inmediata |
 | `!conf-premio Premio \| Puntos \| Patrocinador` | Configurar el premio del leaderboard |
-| `!mutear [@usuario] [minutos] [motivo]` | Silenciar un usuario |
-| `!desmutear [@usuario]` | Desilenciar un usuario |
+| `!mutear` `<id\|número\|@usuario> [minutos] [motivo]` | Silenciar un usuario |
+| `!desmutear` `<id\|número\|@usuario>` | Desilenciar un usuario |
 | `!muteados` | Ver usuarios actualmente silenciados |
 | `!inactivos` | Listar miembros inactivos hace ≥30 días |
 | `!dar-puntos` `<id\|número\|@mención> N [motivo]` | Otorgar puntos extra a un usuario |
@@ -163,7 +174,7 @@ Cuando el bot publica una pregunta la elimina del banco. Las respuestas de los u
 | **Recordatorio de "hoy es el día"** | Si `reminderTodayRepeat.enabled` está activo, el aviso de entrega para el mismo día se repite `times` veces distribuidas entre `startHour` y `endHour` |
 | **Resumen semanal** | Se envía el día/hora configurados con todas las entregas de los próximos 7 días |
 | **Preguntas del día** | El bot publica automáticamente `questionsPerDay` preguntas del banco (`daily-questions.json`) distribuidas a lo largo del día entre `startHour` y `endHour` |
-| **Respuesta a pregunta del día** | Responder (citando) el mensaje de una pregunta del día compara la respuesta contra la respuesta correcta almacenada usando similitud de palabras clave. Si supera el umbral, otorga puntos variables según la dificultad al primero en responder correctamente: 🟢 fácil +2, 🟡 normal +3, 🔴 difícil +4. Respuestas incorrectas reciben la respuesta correcta como guía. Respuestas adicionales válidas se guardan como aportes extra sin puntos. |
+| **Respuesta a pregunta del día** | Responder (citando) el mensaje de una pregunta del día valida la respuesta usando **IA de Groq (llama-3.3-70b)** para validación semántica cuando la variable de entorno `GROQ_API_KEY` está configurada, con similitud de palabras clave (umbral 25 %) como respaldo. Si supera el umbral, otorga puntos variables según la dificultad al primero en responder correctamente: 🟢 fácil +2, 🟡 normal +3, 🔴 difícil +4. Respuestas incorrectas reciben la respuesta correcta como guía. Respuestas adicionales válidas se guardan como aportes extra sin puntos. |
 | **Advertencias de palabras** | El bot advierte en el grupo si detecta una palabra prohibida |
 | **Aplicación del silencio** | Los mensajes de usuarios silenciados son eliminados y reciben un aviso por privado |
 | **Revisión de inactividad** | Se ejecuta diariamente a las 10:00 AM (Bogotá); advierte tras `warnAfterDays` días y remueve tras `removeAfterDays` días adicionales |

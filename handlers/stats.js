@@ -44,8 +44,10 @@ function buildBar(value) {
 
 /**
  * Genera el perfil de stats de un usuario individual
+ * @param {string}  number — phone number
+ * @param {boolean} isSelf — true when the caller is viewing their own stats
  */
-function buildUserStats(number) {
+function buildUserStats(number, isSelf = true) {
   const stats = getStats();
   const user  = stats[number];
   if (!user) return null;
@@ -53,15 +55,17 @@ function buildUserStats(number) {
   const board = getLeaderboard(100);
   const rank  = board.findIndex(u => u.number === number) + 1;
 
+  const header = isSelf ? '📊 *Tus estadísticas*' : `📊 *Estadísticas de ${user.name || number}*`;
+
   return (
-    `📊 *Tus estadísticas*\n\n` +
+    `${header}\n\n` +
     `👤 ${user.name || number}\n` +
     `🏆 Posición: #${rank}\n` +
     `⭐ Puntos totales: ${user.totalPoints}\n\n` +
     `📚 Tareas propuestas: ${user.tasksProposed}\n` +
     `✅ Tareas aprobadas: ${user.tasksApproved}\n` +
     `📖 Apuntes aprobados: ${user.notesApproved}\n` +
-    `💬 Preguntas respondidas: ${user.questionsAnswered}\n` 
+    `💬 Preguntas respondidas: ${user.questionsAnswered}\n`
   );
 }
 

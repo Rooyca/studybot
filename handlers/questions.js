@@ -1,6 +1,18 @@
 // sistema de preguntas del día
 
 const { saveQuestion, getQuestions, updateQuestion, incrementStat, getDailyQuestions, saveDailyQuestions } = require('./storage');
+const OpenAI = require('openai');
+
+// ─── Groq client (lazy — only created when the API key is present) ────────────
+
+let _groq = null;
+function getGroq() {
+  if (_groq) return _groq;
+  const apiKey = process.env.api;
+  if (!apiKey) return null;
+  _groq = new OpenAI({ apiKey, baseURL: 'https://api.groq.com/openai/v1' });
+  return _groq;
+}
 
 // ─── Difficulty → points mapping ──────────────────────────────────────────────
 
@@ -51,6 +63,44 @@ function computeSimilarity(studentAnswer, correctAnswer) {
 
 const SIMILARITY_THRESHOLD = 0.25;
 
+// ─── AI answer checker ─────────────────────────────────────────────────────────
+
+/**
+ * Uses Gemini to evaluate whether the student's answer is semantically correct.
+ * Returns { correct: boolean, reason: string } or throws on failure.
+ */
+async function checkAnswerWithAI(question, correctAnswer, studentAnswer) {
+  const groq = getGroq();
+  if (!groq) throw new Error('No API key configured');
+
+  const response = await groq.chat.completions.create({
+    model: 'llama-3.3-70b-versatile',
+    temperature: 0,
+    max_tokens: 150,
+    response_format: { type: 'json_object' },
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Eres un evaluador de respuestas para un grupo de estudio universitario. ' +
+          'Determina si la respuesta del estudiante es correcta o suficientemente equivalente a la respuesta esperada, aunque esté formulada de forma diferente. ' +
+          'Responde ÚNICAMENTE con JSON: {"correct": true/false, "reason": "breve explicación en español"}',
+      },
+      {
+        role: 'user',
+        content:
+          `Pregunta: ${question}\n` +
+          `Respuesta esperada: ${correctAnswer}\n` +
+          `Respuesta del estudiante: ${studentAnswer}\n\n` +
+          '¿Es correcta la respuesta del estudiante?',
+      },
+    ],
+  });
+
+  const parsed = JSON.parse(response.choices[0].message.content.trim());
+  return { correct: Boolean(parsed.correct), reason: parsed.reason || '' };
+}
+
 // ─── Core functions ────────────────────────────────────────────────────────────
 
 /**
@@ -64,6 +114,19 @@ async function sendScheduledQuestion(client, config) {
   const pool = getDailyQuestions();
   if (!pool.length) {
     console.log('[DAILY QUESTION] No hay preguntas disponibles en el banco.');
+    return false;
+  }
+
+  // Enforce daily limit: count questions already sent today (Bogota time)
+  const questionsPerDay = config.dailyQuestions?.questionsPerDay ?? 3;
+  const bogotaToday = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+  const sentToday = getQuestions().filter(q => {
+    if (!q.askedAt) return false;
+    return new Date(q.askedAt).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) === bogotaToday;
+  }).length;
+
+  if (sentToday >= questionsPerDay) {
+    console.log(`[DAILY QUESTION] Límite diario alcanzado (${sentToday}/${questionsPerDay}).`);
     return false;
   }
 
@@ -111,13 +174,26 @@ async function processAnswer(msg, responderNumber, responderName, answerText) {
   }
 
   if (question.correctAnswer) {
-    const similarity = computeSimilarity(answerText, question.correctAnswer);
-    if (similarity < SIMILARITY_THRESHOLD) {
+    let isCorrect = false;
+    let checkedByAI = false;
+
+    try {
+      const aiResult = await checkAnswerWithAI(question.question, question.correctAnswer, answerText);
+      isCorrect = aiResult.correct;
+      checkedByAI = true;
+      console.log(`[AI CHECK] correct=${isCorrect} | reason="${aiResult.reason}"`);
+    } catch (err) {
+      console.warn('[AI CHECK] Falló, usando similitud como respaldo:', err.message);
+      const similarity = computeSimilarity(answerText, question.correctAnswer);
+      isCorrect = similarity >= SIMILARITY_THRESHOLD;
+    }
+
+    if (!isCorrect) {
       return {
         status:        'wrong_answer',
         question:      question.question,
         correctAnswer: question.correctAnswer,
-        similarity,
+        checkedByAI,
       };
     }
   }

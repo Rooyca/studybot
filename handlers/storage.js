@@ -341,6 +341,70 @@ function getLeaderboard(limit = 5) {
 }
 
 /**
+ * Transfers points from one user to another (donation).
+ * Deducts from the donor's bonusPoints and adds to the recipient's bonusPoints.
+ * Returns null if the donor doesn't have enough totalPoints.
+ * @param {string} fromNumber — donor phone number
+ * @param {string} fromName   — donor display name
+ * @param {string} toNumber   — recipient phone number
+ * @param {string} toName     — recipient display name
+ * @param {number} amount     — points to transfer (positive integer)
+ */
+function transferPoints(fromNumber, fromName, toNumber, toName, amount) {
+  const stats = getStats();
+
+  const donor = stats[fromNumber];
+  if (!donor || (donor.totalPoints || 0) < amount) return null;
+
+  // Deduct from donor
+  if (!donor.bonusPoints) donor.bonusPoints = 0;
+  donor.bonusPoints -= amount;
+  donor.name = fromName;
+  donor.totalPoints =
+    (donor.tasksApproved     * 7) +
+    (donor.tasksProposed     * 3) +
+    (donor.notesApproved     * 5) +
+    (donor.notesProposed     * 2) +
+    (donor.resourcesApproved * 2) +
+    (donor.resourcesProposed * 1) +
+    (donor.questionPoints    || 0) +
+    (donor.questionsAsked    * 1) +
+    (donor.remindersApproved * 1) +
+    (donor.bonusPoints       || 0);
+
+  // Add to recipient
+  if (!stats[toNumber]) {
+    stats[toNumber] = {
+      name: toName,
+      tasksProposed: 0, tasksApproved: 0,
+      notesProposed: 0, notesApproved: 0,
+      resourcesProposed: 0, resourcesApproved: 0,
+      questionsAnswered: 0, questionsAsked: 0,
+      questionPoints: 0, remindersApproved: 0,
+      bonusPoints: 0, totalPoints: 0,
+    };
+  }
+  stats[toNumber].name = toName;
+  if (!stats[toNumber].bonusPoints) stats[toNumber].bonusPoints = 0;
+  stats[toNumber].bonusPoints += amount;
+  const r = stats[toNumber];
+  r.totalPoints =
+    (r.tasksApproved     * 7) +
+    (r.tasksProposed     * 3) +
+    (r.notesApproved     * 5) +
+    (r.notesProposed     * 2) +
+    (r.resourcesApproved * 2) +
+    (r.resourcesProposed * 1) +
+    (r.questionPoints    || 0) +
+    (r.questionsAsked    * 1) +
+    (r.remindersApproved * 1) +
+    (r.bonusPoints       || 0);
+
+  write('stats', stats);
+  return { donor: stats[fromNumber], recipient: stats[toNumber] };
+}
+
+/**
  * Adds bonus points manually to a user (e.g. for unscheduled dynamics).
  * @param {string} number  — phone number
  * @param {string} name    — display name
@@ -544,7 +608,7 @@ module.exports = {
   // faq
   getFaqs, getActiveFaqs, saveFaq, saveFaqForReminder, deleteFaq, deleteFaqsByReminderId, matchFaq,
   // stats
-  getStats, incrementStat, getLeaderboard, addBonusPoints,
+  getStats, incrementStat, getLeaderboard, addBonusPoints, transferPoints,
   // mute
   getMuted, muteUser, unmuteUser, isMuted, cleanExpiredMutes,
   // questions

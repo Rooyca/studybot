@@ -18,10 +18,10 @@
 //   !proponer-recurso           — Proponer un recurso para revisión
 //   !faq                        — Ver preguntas frecuentes
 //   !tabla                      — Ver leaderboard
-//   !puntos                     — Ver tus propias estadísticas
+//   !puntos [@mention o id]         — Ver estadísticas propias o de otro usuario
+//   !donar-puntos [@mention o id] N  — Donar N puntos propios a otro usuario
 //   !premio                     — Ver el premio actual del leaderboard
 //   (responde citando la pregunta del día para ganar puntos)
-//   !admins                     — Ver administradores
 //   !recordatorio "T" YYYY-MM-DD [desc]   — Agregar recordatorio
 //   !borrar-recordatorio [id]             — Borrar recordatorio
 //   !pendientes                           — Ver todas las propuestas esperando revisión (tareas, apuntes, recursos, recordatorios)
@@ -45,6 +45,8 @@
 //   !todos [mensaje]                        — Enviar mensaje privado a todos los miembros del grupo
 //   !msg [mensaje]                          — Enviar mensaje al grupo como el bot (solo desde privado)
 // ══════════════════════════════════════════════════════════════════════════════
+
+require('dotenv').config();
 
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
@@ -206,6 +208,8 @@ const HELP_PUBLIC = `
 🏆 *Estadísticas*
 • \`!tabla\` — Tabla de puntos del grupo
 • \`!puntos\` — Tu puntaje personal
+• \`!puntos @usuario\` — Ver puntaje de otro usuario
+• \`!donar-puntos @usuario N\` — Donar N de tus puntos a otro usuario
 • \`!premio\` — Ver el premio actual
 `.trim();
 
@@ -231,6 +235,7 @@ const HELP_ADMIN = `
 🤔 *Banco de preguntas del día*
 \`!add-pregunta fácil|normal|difícil | Pregunta | Respuesta\`
 _(agrega al banco; se publicará automáticamente según el horario configurado)_
+\`!publicar-pregunta\` / \`!pq\` — Publicar una pregunta aleatoria ahora (cuenta en el límite diario)
 
 🎁 *Premio*
 \`!conf-premio Premio | Puntos | Patrocinador\`
@@ -1104,6 +1109,40 @@ client.on('message', async msg => {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
+    // !publicar-pregunta | !pq  — Publica una pregunta aleatoria ahora (ADMIN)
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'publicar-pregunta' || cmd === 'pq') {
+      if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
+
+      const pool = storage.getDailyQuestions();
+      if (!pool.length) {
+        await reply(msg, '❌ El banco de preguntas está vacío. Agrega preguntas con `!add-pregunta`.');
+        return;
+      }
+
+      const questionsPerDay = config.dailyQuestions?.questionsPerDay ?? 3;
+      const bogotaToday = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+      const sentToday = storage.getQuestions().filter(q => {
+        if (!q.askedAt) return false;
+        return new Date(q.askedAt).toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }) === bogotaToday;
+      }).length;
+
+      if (sentToday >= questionsPerDay) {
+        await reply(msg, `⚠️ Ya se alcanzó el límite de preguntas del día (*${sentToday}/${questionsPerDay}*). Puedes cambiar \`questionsPerDay\` en la configuración.`);
+        return;
+      }
+
+      const sent = await sendScheduledQuestion(client, config);
+      if (sent) {
+        const remaining = questionsPerDay - sentToday - 1;
+        await reply(msg, `✅ *Pregunta publicada.* Quedan *${remaining}* pregunta(s) programada(s) para hoy.`);
+      } else {
+        await reply(msg, '❌ No se pudo publicar la pregunta.');
+      }
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
     // !tabla — Leaderboard
     // ══════════════════════════════════════════════════════════════════════════
     if (cmd === 'tabla') {
@@ -1112,11 +1151,79 @@ client.on('message', async msg => {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // !puntos — Puntaje personal
+    // !puntos [@mention o id] — Puntaje personal o de otro usuario
     // ══════════════════════════════════════════════════════════════════════════
     if (cmd === 'puntos') {
-      const text = buildUserStats(number);
-      await reply(msg, text || '📊 Aún no tienes estadísticas. ¡Empieza a proponer tareas/apuntes/recordatorios y responder preguntas!');
+      const mentionedIds = msg.mentionedIds || [];
+      const targetNum = args.trim() ? resolveTarget(args, mentionedIds) : null;
+      if (targetNum) {
+        const text = buildUserStats(targetNum, false);
+        await reply(msg, text || '📊 Ese usuario aún no tiene estadísticas registradas.');
+      } else {
+        const text = buildUserStats(number, true);
+        await reply(msg, text || '📊 Aún no tienes estadísticas. ¡Empieza a proponer tareas/apuntes/recordatorios y responder preguntas!');
+      }
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !donar-puntos <@mention o id> N — Transferir puntos propios a otro usuario
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'donar-puntos') {
+      const mentionedIds = msg.mentionedIds || [];
+      const targetNum = resolveTarget(args, mentionedIds);
+      if (!targetNum) {
+        await reply(msg, '❌ Uso: `!donar-puntos <@mention o id> N`\n\nEjemplo: `!donar-puntos @Juan 10`');
+        return;
+      }
+      if (targetNum === number) {
+        await reply(msg, '❌ No puedes donarte puntos a ti mismo.');
+        return;
+      }
+
+      const rest = argsAfterTarget(args, mentionedIds);
+      const amount = parseInt(rest.trim().split(/\s+/)[0]);
+      if (isNaN(amount) || amount <= 0) {
+        await reply(msg, '❌ La cantidad de puntos debe ser un número mayor a 0.\n\nEjemplo: `!donar-puntos @Juan 10`');
+        return;
+      }
+
+      // Resolve names
+      const activityData = storage.getActivity();
+      let senderName = activityData[number]?.name || number;
+      let targetName = activityData[targetNum]?.name || targetNum;
+      if (!activityData[targetNum]?.name) {
+        try {
+          const c = await client.getContactById(`${targetNum}@c.us`);
+          targetName = c.pushname || c.name || targetNum;
+        } catch (_) {}
+      }
+
+      const result = storage.transferPoints(number, senderName, targetNum, targetName, amount);
+      if (!result) {
+        const senderStats = storage.getStats()[number];
+        const available = senderStats?.totalPoints || 0;
+        await reply(msg, `❌ No tienes suficientes puntos. Tu saldo actual: *${available} pts*.`);
+        return;
+      }
+
+      storage.log('donate_points', { from: number, to: targetNum, amount });
+
+      await reply(msg,
+        `🎁 *Puntos donados con éxito*\n\n` +
+        `👤 Para: *${targetName}*\n` +
+        `⭐ Cantidad: *${amount} pts*\n\n` +
+        `Tu nuevo saldo: *${result.donor.totalPoints} pts*`
+      );
+
+      try {
+        await client.sendMessage(`${targetNum}@c.us`,
+          `🎁 *¡Recibiste una donación de puntos!*\n\n` +
+          `👤 De: *${senderName}*\n` +
+          `⭐ Cantidad: *+${amount} pts*\n\n` +
+          `Tu nuevo saldo: *${result.recipient.totalPoints} pts*`
+        );
+      } catch (_) {}
       return;
     }
 

@@ -52,6 +52,14 @@ All settings live in `config.json`. See `config.json.example` for the full struc
 | `dailyQuestions` | Daily questions config (`enabled`, `questionsPerDay`, `startHour`, `endHour`, `message`) |
 | `activityCheck` | Inactivity warning and removal thresholds (`warnAfterDays`, `removeAfterDays`) |
 
+### AI-powered answer validation (optional)
+
+Set the `GROQ_API_KEY` environment variable to enable semantic answer grading for daily questions using the **Groq llama-3.3-70b** model. Without it, the bot falls back to keyword similarity (25 % threshold).
+
+```bash
+export GROQ_API_KEY=your_groq_api_key_here
+```
+
 ### Subjects (`config.subjects`)
 
 Configure the subjects for the current semester so users can propose homeworks or notes without needing to paste a Drive link manually. The bot normalizes subject name variants (aliases) and auto-fills the Drive folder link.
@@ -125,8 +133,10 @@ When the bot publishes a question it is removed from the pool. User replies are 
 | `!preguntas` | View recent daily questions and their answers |
 | `!faq` | View frequently asked questions |
 | `!tabla` | Group leaderboard |
-| `!puntos` | Your personal score and stats |
+| `!puntos` / `!puntos @user` | Your personal score and stats, or another user's |
+| `!donar-puntos` `@usuario N` | Donate N of your bonus points to another user |
 | `!premio` | Current leaderboard prize |
+| `!conf` | View the current bot configuration |
 
 ### Admin
 
@@ -134,7 +144,7 @@ When the bot publishes a question it is removed from the pool. User replies are 
 |---|---|
 | `!recordatorio "Title" YYYY-MM-DD [desc]` | Add a reminder directly (no review needed) |
 | `!borrar-recordatorio [id]` | Delete a reminder |
-| `!pendientes` | View **all** pending proposals — homeworks, notes, and reminders — in one place |
+| `!pendientes` | View **all** pending proposals — homeworks, notes, resources, and reminders — in one place |
 | `!aprobar [id]` | Approve any pending proposal (homework, notes, or reminder) |
 | `!rechazar [id] [reason]` | Reject any pending proposal with an optional reason |
 | `!borrar-tarea [id]` | Delete an approved homework |
@@ -143,9 +153,10 @@ When the bot publishes a question it is removed from the pool. User replies are 
 | `!add-faq keyword1,keyword2 \| Question \| Answer` | Add an FAQ entry |
 | `!del-faq [id]` | Delete an FAQ entry |
 | `!add-pregunta easy\|normal\|hard \| Question \| Answer` | Add a question to the daily questions bank |
+| `!publicar-pregunta` / `!pq` | Publish a random question from the bank immediately |
 | `!conf-premio Prize \| Points \| Sponsor` | Set the leaderboard prize |
-| `!mutear [@user] [minutes] [reason]` | Mute a user |
-| `!desmutear [@user]` | Unmute a user |
+| `!mutear` `<id\|number\|@user> [minutes] [reason]` | Mute a user |
+| `!desmutear` `<id\|number\|@user>` | Unmute a user |
 | `!muteados` | List currently muted users |
 | `!inactivos` | List members inactive for ≥30 days |
 | `!dar-puntos` `<id\|number\|@mention> N [reason]` | Award bonus points to a user |
@@ -165,7 +176,7 @@ When the bot publishes a question it is removed from the pool. User replies are 
 | **"Due today" repeat reminders** | When `reminderTodayRepeat.enabled` is true, the same-day deadline alert is sent `times` times evenly spread between `startHour` and `endHour` |
 | **Weekly digest** | Sent on the configured weekday/hour with all deadlines for the next 7 days |
 | **Daily questions** | The bot automatically publishes `questionsPerDay` questions from the pool (`daily-questions.json`) spread throughout the day between `startHour` and `endHour` |
-| **Daily question scoring** | Quoting/replying to a daily question validates the answer by keyword similarity against the correct answer (25 % threshold). Awards variable points based on difficulty to the first correct answerer: 🟢 easy +2, 🟡 normal +3, 🔴 hard +4. Incorrect answers receive the correct answer as feedback. |
+| **Daily question scoring** | Quoting/replying to a daily question validates the answer using **Groq AI (llama-3.3-70b)** for semantic checking when a `GROQ_API_KEY` environment variable is set, with keyword similarity (25 % threshold) as fallback. Awards variable points based on difficulty to the first correct answerer: 🟢 easy +2, 🟡 normal +3, 🔴 hard +4. Incorrect answers receive the correct answer as feedback. Additional valid answers are saved as extras with no points. |
 | **Word warnings** | Bot warns in-group when a forbidden word is detected |
 | **Mute enforcement** | Muted users' messages are deleted and they receive a DM |
 | **Inactivity check** | Runs daily at 10:00 AM (Bogotá); warns after `warnAfterDays`, removes after an additional `removeAfterDays` |
