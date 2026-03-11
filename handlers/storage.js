@@ -325,7 +325,8 @@ function incrementStat(number, name, metric, amount = 1) {
     (s.resourcesProposed * 1) +
     (s.questionPoints    || 0) +
     (s.questionsAsked    * 1) +
-    (s.remindersApproved * 1);
+    (s.remindersApproved * 1) +
+    (s.bonusPoints       || 0);
 
   write('stats', stats);
   return stats[number];
@@ -337,6 +338,47 @@ function getLeaderboard(limit = 5) {
     .map(([number, data]) => ({ number, ...data }))
     .sort((a, b) => b.totalPoints - a.totalPoints)
     .slice(0, limit);
+}
+
+/**
+ * Adds bonus points manually to a user (e.g. for unscheduled dynamics).
+ * @param {string} number  — phone number
+ * @param {string} name    — display name
+ * @param {number} amount  — points to add (positive integer)
+ * @param {string} reason  — optional reason for the log
+ */
+function addBonusPoints(number, name, amount, reason = '') {
+  const stats = getStats();
+  if (!stats[number]) {
+    stats[number] = {
+      name,
+      tasksProposed: 0, tasksApproved: 0,
+      notesProposed: 0, notesApproved: 0,
+      resourcesProposed: 0, resourcesApproved: 0,
+      questionsAnswered: 0, questionsAsked: 0,
+      questionPoints: 0, remindersApproved: 0,
+      bonusPoints: 0, totalPoints: 0,
+    };
+  }
+  stats[number].name = name;
+  if (!stats[number].bonusPoints) stats[number].bonusPoints = 0;
+  stats[number].bonusPoints += amount;
+
+  const s = stats[number];
+  s.totalPoints =
+    (s.tasksApproved     * 7) +
+    (s.tasksProposed     * 3) +
+    (s.notesApproved     * 5) +
+    (s.notesProposed     * 2) +
+    (s.resourcesApproved * 2) +
+    (s.resourcesProposed * 1) +
+    (s.questionPoints    || 0) +
+    (s.questionsAsked    * 1) +
+    (s.remindersApproved * 1) +
+    (s.bonusPoints       || 0);
+
+  write('stats', stats);
+  return stats[number];
 }
 
 // ─── Mute ─────────────────────────────────────────────────────────────────────
@@ -417,10 +459,23 @@ function markAnswered(id) {
 
 function getActivity() { return read('activity'); }
 
-/** Records the last time a user sent a message in the group. Clears any pending warning. */
+function getNextActivityId() {
+  const data = getActivity();
+  const ids = Object.values(data).map(u => u.id || 0);
+  return ids.length ? Math.max(...ids) + 1 : 1;
+}
+
+/** Records the last time a user sent a message in the group. Clears any pending warning.
+ *  Assigns a new sequential id to first-time users. */
 function updateLastSeen(number, name) {
   const data = getActivity();
-  data[number] = { name, lastSeen: new Date().toISOString(), warnedAt: null };
+  const existing = data[number];
+  data[number] = {
+    id: (existing && existing.id) ? existing.id : getNextActivityId(),
+    name,
+    lastSeen: new Date().toISOString(),
+    warnedAt: null,
+  };
   write('activity', data);
 }
 
@@ -431,6 +486,15 @@ function setWarnedAt(number) {
     data[number].warnedAt = new Date().toISOString();
     write('activity', data);
   }
+}
+
+/** Looks up a user by their short numeric id in activity.json.
+ *  Returns { number, id, name, lastSeen, warnedAt } or null. */
+function getUserByActivityId(id) {
+  const data = getActivity();
+  const entry = Object.entries(data).find(([, u]) => u.id === id);
+  if (!entry) return null;
+  return { number: entry[0], ...entry[1] };
 }
 
 // ─── Prize ────────────────────────────────────────────────────────────────────
@@ -480,7 +544,7 @@ module.exports = {
   // faq
   getFaqs, getActiveFaqs, saveFaq, saveFaqForReminder, deleteFaq, deleteFaqsByReminderId, matchFaq,
   // stats
-  getStats, incrementStat, getLeaderboard,
+  getStats, incrementStat, getLeaderboard, addBonusPoints,
   // mute
   getMuted, muteUser, unmuteUser, isMuted, cleanExpiredMutes,
   // questions
@@ -488,7 +552,7 @@ module.exports = {
   // daily questions
   getDailyQuestions, saveDailyQuestions,
   // activity
-  getActivity, updateLastSeen, setWarnedAt,
+  getActivity, updateLastSeen, setWarnedAt, getUserByActivityId,
   // prize
   getPrize, setPrize,
   // logs

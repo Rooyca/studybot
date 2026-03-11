@@ -34,6 +34,7 @@
 //   !del-faq [id]                         — Borrar FAQ
 //   !add-pregunta fácil|normal|difícil | [pregunta] | [respuesta]  — Agregar pregunta al banco
 //   !conf-premio premio | puntos | patrocinador  — Configurar premio del leaderboard
+//   !dar-puntos [@mention o número] N [motivo]  — Sumar N puntos manualmente a un usuario
 //   !mutear [@mention o número] [min] [motivo]  — Mutear usuario
 //   !desmutear [@mention o número]        — Desmutear usuario
 //   !muteados                             — Ver usuarios muteados
@@ -42,6 +43,7 @@
 //   !test-actividad                       — Forzar revisión de inactividad
 //   !inactivos                            — Ver usuarios inactivos
 //   !todos [mensaje]                        — Enviar mensaje privado a todos los miembros del grupo
+//   !msg [mensaje]                          — Enviar mensaje al grupo como el bot (solo desde privado)
 // ══════════════════════════════════════════════════════════════════════════════
 
 const { Client, LocalAuth } = require('whatsapp-web.js');
@@ -134,16 +136,39 @@ function isAdmin(number) {
 function reply(msg, text) { return msg.reply(text); }
 
 /**
- * Extrae el número de un mention (@tag) o lo usa directo.
- * whatsapp-web.js incluye mentions en msg.mentionedIds
+ * Resolves a target user's phone number from:
+ *   1. A real WhatsApp @mention (msg.mentionedIds)
+ *   2. A short numeric ID (1–4 digits) assigned in activity.json
+ *   3. A direct phone number (10+ digits)
+ * Returns the phone number string (no @c.us suffix) or null.
  */
-function extractTarget(args, mentionedIds) {
+function resolveTarget(args, mentionedIds) {
   if (mentionedIds && mentionedIds.length > 0) {
     return mentionedIds[0].replace('@c.us', '');
   }
-  // fallback: número escrito directamente
-  const num = args.trim().replace(/\D/g, '');
-  return num || null;
+  const firstToken = args.trim().split(/\s+/)[0];
+  if (!firstToken) return null;
+
+  // Short ID: 1–4 digits → look up in activity.json
+  if (/^\d{1,4}$/.test(firstToken)) {
+    const user = storage.getUserByActivityId(parseInt(firstToken));
+    return user ? user.number : null;
+  }
+
+  // Direct phone number: strip non-digits and require at least 10
+  const num = firstToken.replace(/\D/g, '');
+  return num.length >= 10 ? num : null;
+}
+
+/**
+ * Strips the target identifier (first token or @mention) from args,
+ * returning only the remaining text (amount + reason, etc.)
+ */
+function argsAfterTarget(args, mentionedIds) {
+  if (mentionedIds && mentionedIds.length > 0) {
+    return args.replace(/@\S+/g, '').trim();
+  }
+  return args.trim().split(/\s+/).slice(1).join(' ');
 }
 
 // ─── Textos de ayuda ──────────────────────────────────────────────────────────
@@ -210,9 +235,13 @@ _(agrega al banco; se publicará automáticamente según el horario configurado)
 🎁 *Premio*
 \`!conf-premio Premio | Puntos | Patrocinador\`
 
+⭐ *Puntos manuales*
+\`!usuarios\` — Ver lista de usuarios con su ID
+\`!dar-puntos <id|número> N [motivo]\` — Sumar N puntos a un usuario
+
 🔇 *Moderación*
-\`!mutear [@usuario] [minutos] [motivo]\`
-\`!desmutear [@usuario]\`
+\`!mutear <id|número> [minutos] [motivo]\`
+\`!desmutear <id|número>\`
 \`!muteados\`
 
 🔧 *Pruebas*
@@ -223,6 +252,7 @@ _(agrega al banco; se publicará automáticamente según el horario configurado)
 
 📢 *Difusión*
 \`!todos [mensaje]\` — Enviar mensaje privado a todos los miembros del grupo
+\`!msg [mensaje]\` — Enviar mensaje al grupo como el bot _(solo desde privado)_
 `.trim();
 
 // ─── Message handler ──────────────────────────────────────────────────────────
@@ -261,9 +291,8 @@ client.on('message', async msg => {
 
           case 'wrong_answer':
             await reply(msg,
-              `❌ *Tu respuesta no coincide suficientemente con la respuesta esperada.*\n\n` +
+              `❌ *Tu respuesta no coincide lo suficiente con la respuesta esperada.*\n\n` +
               `📌 Pregunta: _"${result.question}"_\n\n` +
-              `📖 *Respuesta correcta:* ${result.correctAnswer}\n\n` +
               `_Intenta incluir los conceptos clave en tu respuesta._`
             );
             break;
@@ -1133,6 +1162,53 @@ client.on('message', async msg => {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
+    // !dar-puntos <id|número|@mention> N [motivo]  (ADMIN)
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'dar-puntos') {
+      if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
+
+      const mentionedIds = msg.mentionedIds || [];
+      const targetNum = resolveTarget(args, mentionedIds);
+      if (!targetNum) {
+        await reply(msg, '❌ Uso: `!dar-puntos <id|número> N [motivo]`\n\nEjemplo: `!dar-puntos 3 5 Ganó la dinámica`\nUsa `!usuarios` para ver los IDs.');
+        return;
+      }
+
+      // Strip target from args then extract amount + reason
+      const rest = argsAfterTarget(args, mentionedIds);
+      const parts = rest.trim().split(/\s+/);
+      const amount = parseInt(parts[0]);
+      if (isNaN(amount) || amount <= 0) {
+        await reply(msg, '❌ La cantidad de puntos debe ser un número mayor a 0.\n\nEjemplo: `!dar-puntos 3 5 Ganó la dinámica`');
+        return;
+      }
+      const reason = parts.slice(1).join(' ') || 'Dinámica manual';
+
+      // Resolve target name from activity or WhatsApp contact
+      let targetName = targetNum;
+      const activityData = storage.getActivity();
+      if (activityData[targetNum] && activityData[targetNum].name) {
+        targetName = activityData[targetNum].name;
+      } else {
+        try {
+          const targetContact = await client.getContactById(`${targetNum}@c.us`);
+          targetName = targetContact.pushname || targetContact.name || targetNum;
+        } catch (_) {}
+      }
+
+      const updated = storage.addBonusPoints(targetNum, targetName, amount, reason);
+      storage.log('bonus_points', { target: targetNum, name: targetName, amount, reason, by: number });
+
+      await reply(msg,
+        `⭐ *Puntos otorgados*\n\n` +
+        `👤 ${targetName}\n` +
+        `➕ ${amount} pts — _${reason}_\n` +
+        `🏆 Total: ${updated.totalPoints} pts`
+      );
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
     // !mutear [@usuario] [minutos] [motivo]  (ADMIN)
     // ══════════════════════════════════════════════════════════════════════════
     if (cmd === 'mutear') {
@@ -1140,10 +1216,10 @@ client.on('message', async msg => {
       if (!isGroup) { await reply(msg, '⚠️ Este comando solo funciona en grupos.'); return; }
 
       const mentionedIds = msg.mentionedIds || [];
-      const targetNum = extractTarget(args, mentionedIds);
+      const targetNum = resolveTarget(args, mentionedIds);
 
       if (!targetNum) {
-        await reply(msg, '❌ Uso: `!mutear @usuario [minutos] [motivo]`\n\nEjemplo: `!mutear @Juan 60 Spam repetitivo`');
+        await reply(msg, '❌ Uso: `!mutear <id|número> [minutos] [motivo]`\n\nEjemplo: `!mutear 3 60 Spam`\nUsa `!usuarios` para ver los IDs.');
         return;
       }
       if (isAdmin(targetNum)) {
@@ -1151,12 +1227,12 @@ client.on('message', async msg => {
         return;
       }
 
-      // Parsear minutos y motivo del resto del args (sin el @mention)
-      const argsWithoutMention = args.replace(/@\w+/g, '').trim().split(/\s+/);
-      let minutes = parseInt(argsWithoutMention[0]);
+      // Parsear minutos y motivo del resto del args (sin el identificador de usuario)
+      const muteRest = argsAfterTarget(args, mentionedIds).trim().split(/\s+/);
+      let minutes = parseInt(muteRest[0]);
       if (isNaN(minutes) || minutes <= 0) minutes = config.mute.defaultMinutes;
       if (minutes > config.mute.maxMinutes) minutes = config.mute.maxMinutes;
-      const reason = argsWithoutMention.slice(1).join(' ') || 'Sin motivo especificado';
+      const reason = muteRest.slice(1).join(' ') || 'Sin motivo especificado';
 
       const entry = storage.muteUser(targetNum, '', minutes, reason, number);
       const until = formatTime(entry.until);
@@ -1187,8 +1263,8 @@ client.on('message', async msg => {
     if (cmd === 'desmutear') {
       if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
       const mentionedIds = msg.mentionedIds || [];
-      const targetNum = extractTarget(args, mentionedIds);
-      if (!targetNum) { await reply(msg, '❌ Uso: `!desmutear @usuario`'); return; }
+      const targetNum = resolveTarget(args, mentionedIds);
+      if (!targetNum) { await reply(msg, '❌ Uso: `!desmutear <id|número>`\n\nUsa `!usuarios` para ver los IDs.'); return; }
 
       storage.unmuteUser(targetNum);
       await reply(msg, `🔊 *Usuario desmuteado*\n\n👤 +${targetNum} puede volver a escribir en el grupo.`);
@@ -1199,6 +1275,25 @@ client.on('message', async msg => {
         );
       } catch (e) {}
       storage.log('unmute', { target: targetNum, by: number });
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !usuarios  (ADMIN)
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'usuarios') {
+      if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
+      const activityData = storage.getActivity();
+      const entries = Object.entries(activityData)
+        .sort(([, a], [, b]) => (a.id || 0) - (b.id || 0));
+      if (!entries.length) { await reply(msg, '📭 No hay usuarios registrados.'); return; }
+      const lines = entries.map(([num, u]) => {
+        const lastSeen = u.lastSeen
+          ? new Date(u.lastSeen).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit' })
+          : '—';
+        return `*#${u.id}* ${u.name} _(visto: ${lastSeen})_`;
+      });
+      await reply(msg, `👥 *Usuarios registrados*\n\n${lines.join('\n')}\n\n_Usa el ID con !dar-puntos, !mutear, etc._`);
       return;
     }
 
@@ -1270,6 +1365,26 @@ client.on('message', async msg => {
       }
       const lines = inactive.map(e => `• ${e.name} (+${e.num}): ${e.days} días${e.warnedAt ? ' ⚠️ advertido' : ''}`);
       await reply(msg, `😴 *Usuarios inactivos (≥${warnDays} días)*\n\n${lines.join('\n')}`);
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !msg [mensaje] (ADMIN) — Enviar mensaje al grupo como el bot
+    // Solo se puede usar desde el chat privado con el bot
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'msg') {
+      if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
+      if (isGroup) { await reply(msg, '⚠️ Este comando solo se puede usar en el chat privado con el bot.'); return; }
+      if (!args) { await reply(msg, '❌ Uso: `!msg [mensaje]`\n\nEjemplo: `!msg Hola a todos, mañana hay clase extra.`'); return; }
+
+      try {
+        await client.sendMessage(config.groupId, args);
+        await reply(msg, '✅ Mensaje enviado al grupo.');
+        storage.log('msg_to_group', { by: number, message: args });
+      } catch (err) {
+        console.error('[MSG ERROR]', err.message);
+        await reply(msg, '❌ No se pudo enviar el mensaje al grupo. Verifica que el bot siga en el grupo.');
+      }
       return;
     }
 

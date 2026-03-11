@@ -2,7 +2,7 @@
 
 Bot de WhatsApp para grupos de estudio con recordatorios de entregas, seguimiento de tareas, compartir apuntes, compartir recursos, preguntas del día, moderación, FAQ y leaderboard. Construido con [whatsapp-web.js](https://github.com/pedroslopez/whatsapp-web.js).
 
-> La interfaz y los comandos del bot están en español. Ver [README.md](README.md) para la versión en inglés.
+> La interfaz y los comandos del bot están en español. Ver [README.en.md](README.en.md) para la versión en inglés.
 
 ## Requisitos
 
@@ -104,7 +104,7 @@ Cuando el bot publica una pregunta la elimina del banco. Las respuestas de los u
 
 | Comando | Descripción |
 |---|---|
-| `!ayuda` | Mostrar los comandos disponibles |
+| `!ayuda` / `!help` | Mostrar los comandos disponibles |
 | `!admins` | Listar los administradores del grupo |
 | `!recordatorios` / `!r` | Ver próximas fechas de entrega |
 | `!proponer-recordatorio` / `!pr` `"Título" YYYY-MM-DD [desc]` | Proponer un recordatorio para revisión de un admin |
@@ -146,6 +146,9 @@ Cuando el bot publica una pregunta la elimina del banco. Las respuestas de los u
 | `!desmutear [@usuario]` | Desilenciar un usuario |
 | `!muteados` | Ver usuarios actualmente silenciados |
 | `!inactivos` | Listar miembros inactivos hace ≥30 días |
+| `!dar-puntos` `<id\|número\|@mención> N [motivo]` | Otorgar puntos extra a un usuario |
+| `!usuarios` | Ver todos los usuarios registrados con sus IDs numéricos cortos y última actividad |
+| `!msg` `[mensaje]` | Enviar un mensaje al grupo como el bot (solo desde chat privado con el bot) |
 | `!todos [mensaje]` | Enviar un mensaje privado a todos los miembros no-admin del grupo |
 | `!resumen-semanal` | Forzar el resumen semanal |
 | `!test-recordatorios` | Forzar la revisión de recordatorios |
@@ -160,12 +163,13 @@ Cuando el bot publica una pregunta la elimina del banco. Las respuestas de los u
 | **Recordatorio de "hoy es el día"** | Si `reminderTodayRepeat.enabled` está activo, el aviso de entrega para el mismo día se repite `times` veces distribuidas entre `startHour` y `endHour` |
 | **Resumen semanal** | Se envía el día/hora configurados con todas las entregas de los próximos 7 días |
 | **Preguntas del día** | El bot publica automáticamente `questionsPerDay` preguntas del banco (`daily-questions.json`) distribuidas a lo largo del día entre `startHour` y `endHour` |
-| **Respuesta a pregunta del día** | Responder (citando) el mensaje de una pregunta del día compara la respuesta contra la respuesta correcta almacenada usando similitud de palabras clave. Si supera el umbral, otorga +2 puntos al primero en responder correctamente. Respuestas incorrectas reciben la respuesta correcta como guía. Respuestas adicionales válidas se guardan como aportes extra sin puntos. |
+| **Respuesta a pregunta del día** | Responder (citando) el mensaje de una pregunta del día compara la respuesta contra la respuesta correcta almacenada usando similitud de palabras clave. Si supera el umbral, otorga puntos variables según la dificultad al primero en responder correctamente: 🟢 fácil +2, 🟡 normal +3, 🔴 difícil +4. Respuestas incorrectas reciben la respuesta correcta como guía. Respuestas adicionales válidas se guardan como aportes extra sin puntos. |
 | **Advertencias de palabras** | El bot advierte en el grupo si detecta una palabra prohibida |
 | **Aplicación del silencio** | Los mensajes de usuarios silenciados son eliminados y reciben un aviso por privado |
 | **Revisión de inactividad** | Se ejecuta diariamente a las 10:00 AM (Bogotá); advierte tras `warnAfterDays` días y remueve tras `removeAfterDays` días adicionales |
 | **Auto-respuesta de FAQ** | Cuando un mensaje del grupo contiene una palabra clave que coincide con una entrada de FAQ, el bot responde automáticamente |
 | **FAQ desde recordatorios** | Al agregar un recordatorio con `!recordatorio`, se crea automáticamente una entrada de FAQ con palabras clave extraídas del título y descripción. Al borrar el recordatorio, también se eliminan sus FAQs. |
+| **Registro de actividad** | Cada mensaje en el grupo actualiza la fecha de última actividad del miembro. Cada miembro recibe un ID numérico corto y secuencial usado para apuntarlos en comandos como `!dar-puntos`. |
 
 ## Sistema de puntos
 
@@ -180,6 +184,7 @@ Cuando el bot publica una pregunta la elimina del banco. Las respuestas de los u
 | Pregunta del día respondida — 🟢 Fácil | +2 |
 | Pregunta del día respondida — 🟡 Normal | +3 |
 | Pregunta del día respondida — 🔴 Difícil | +4 |
+| Pregunta del día agregada (vía `!add-pregunta`) | +1 |
 | Recordatorio aprobado | +1 |
 
 ## Licencia

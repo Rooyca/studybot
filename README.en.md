@@ -5,6 +5,7 @@ WhatsApp bot for study groups with deadline reminders, homework tracking, notes 
 > Bot interface and commands are in Spanish. See [README.md](README.md) for the Spanish version.
 
 
+
 ## Requirements
 
 - [Node.js](https://nodejs.org/) v16+
@@ -105,7 +106,7 @@ When the bot publishes a question it is removed from the pool. User replies are 
 
 | Command | Description |
 |---|---|
-| `!ayuda` | Show available commands |
+| `!ayuda` / `!help` | Show available commands |
 | `!admins` | List group admins |
 | `!recordatorios` / `!r` | View upcoming deadlines |
 | `!proponer-recordatorio` / `!pr` `"Title" YYYY-MM-DD [desc]` | Propose a reminder for admin review |
@@ -147,6 +148,9 @@ When the bot publishes a question it is removed from the pool. User replies are 
 | `!desmutear [@user]` | Unmute a user |
 | `!muteados` | List currently muted users |
 | `!inactivos` | List members inactive for ≥30 days |
+| `!dar-puntos` `<id\|number\|@mention> N [reason]` | Award bonus points to a user |
+| `!usuarios` | List all tracked users with their short numeric IDs and last-seen date |
+| `!msg` `[message]` | Send a message to the group as the bot (only from a private chat with the bot) |
 | `!todos [message]` | Send a private DM to every non-admin group member |
 | `!resumen-semanal` | Force the weekly digest |
 | `!test-recordatorios` | Force reminder check |
@@ -167,6 +171,7 @@ When the bot publishes a question it is removed from the pool. User replies are 
 | **Inactivity check** | Runs daily at 10:00 AM (Bogotá); warns after `warnAfterDays`, removes after an additional `removeAfterDays` |
 | **FAQ auto-reply** | When a group message contains a keyword matching an FAQ entry, the bot replies automatically |
 | **FAQ from reminders** | Adding a reminder via `!recordatorio` automatically creates an FAQ entry with keywords extracted from the title/description. Deleting the reminder removes its FAQ entries. |
+| **Activity tracking** | Every message sent in the group updates the member's last-seen timestamp. Each member is assigned a short sequential numeric ID used to target them in commands like `!dar-puntos`. |
 
 ## Points system
 
@@ -181,6 +186,7 @@ When the bot publishes a question it is removed from the pool. User replies are 
 | Daily question answered — 🟢 Easy | +2 |
 | Daily question answered — 🟡 Normal | +3 |
 | Daily question answered — 🔴 Hard | +4 |
+| Daily question asked (via `!add-pregunta`) | +1 |
 | Reminder approved | +1 |
 
 ## License
