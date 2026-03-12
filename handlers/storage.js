@@ -300,6 +300,7 @@ function incrementStat(number, name, metric, amount = 1) {
       questionsAsked: 0,
       questionPoints: 0,
       remindersApproved: 0,
+      bonusPoints: 0,
       totalPoints: 0,
     };
   }
@@ -310,6 +311,7 @@ function incrementStat(number, name, metric, amount = 1) {
   if (!stats[number].resourcesProposed) stats[number].resourcesProposed = 0;
   if (!stats[number].resourcesApproved) stats[number].resourcesApproved = 0;
   if (!stats[number].questionPoints)    stats[number].questionPoints    = 0;
+  if (!stats[number].bonusPoints)       stats[number].bonusPoints       = 0;
   stats[number][metric] = (stats[number][metric] || 0) + amount;
 
   // Recalcular puntos totales.
