@@ -46,6 +46,8 @@
 //   !inactivos                            — Ver usuarios inactivos
 //   !todos [mensaje]                        — Enviar mensaje privado a todos los miembros del grupo
 //   !msg [mensaje]                          — Enviar mensaje al grupo como el bot (solo desde privado)
+//   !dado                                 — Lanzar dados (1-10), ganar/perder puntos
+//   !blackjack [apuesta] | !bj [apuesta]  — Jugar blackjack contra el crupier
 // ══════════════════════════════════════════════════════════════════════════════
 
 require('dotenv').config();
@@ -63,6 +65,7 @@ const { runModeration, formatTime } = require('./handlers/moderation');
 const { buildLeaderboard, buildUserStats, buildNegativePointsLeaderboard }  = require('./handlers/stats');
 const { sendScheduledQuestion, processAnswer, buildQuestionsList, parseDifficulty, DIFFICULTY_POINTS, DIFFICULTY_LABELS } = require('./handlers/questions');
 const { checkInactivity } = require('./handlers/activity');
+const { playBlackjack, playerHit, playerStand, dealerPlay, calculateHandValue, formatHand, formatGameResult } = require('./handlers/blackjack');
 
 // ─── Client setup ─────────────────────────────────────────────────────────────
 
@@ -85,6 +88,9 @@ function resolveSubject(input) {
 }
 
 const pfx = config.prefix || '!';
+
+// ─── Blackjack game state ─────────────────────────────────────────────────────
+const blackjackGames = {}; // userId => { game, bet, timestamp }
 
 const client = new Client({
   authStrategy: new LocalAuth(),
@@ -2785,8 +2791,171 @@ client.on('message', async msg => {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // Comando desconocido
+    // !blackjack | !bj — Play blackjack with points
     // ══════════════════════════════════════════════════════════════════════════
+    
+    // Blackjack hit/stand/result — CHECK THIS FIRST
+    if ((cmd === 'bj' || cmd === 'blackjack') && (args === 'hit' || args === 'stand' || args === 'h' || args === 's')) {
+      const game = blackjackGames[number];
+      if (!game) {
+        await reply(msg, '❌ No hay una partida activa. Inicia una con `!bj <apuesta>`');
+        return;
+      }
+
+      const action = args === 'hit' || args === 'h' ? 'hit' : 'stand';
+
+      if (action === 'hit') {
+        const result = playerHit(game.game);
+        if (!result) {
+          await reply(msg, '❌ Ya te plantaste. Espera el resultado.');
+          return;
+        }
+
+        if (result.bust) {
+          // Player busted
+          const bank = storage.addToBlackjackBank(game.bet);
+          storage.addBonusPoints(number, name, -game.bet, `Perdió blackjack (${game.bet} puntos)`);
+          delete blackjackGames[number];
+
+          let resultMsg = `💔 *¡REVENTASTE!* 💔\n\n`;
+          resultMsg += `🎴 *Tu mano*: ${formatHand(game.game.playerHand)} = *${result.value}*\n`;
+          resultMsg += `⚠️ Superaste 21 - ¡PERDISTE!\n\n`;
+          resultMsg += `💰 *Apuesta perdida:* -${game.bet} puntos\n`;
+          resultMsg += `🏦 *Banco del grupo:* +${game.bet} = *${bank}* puntos\n\n`;
+          resultMsg += `El siguiente jugador podría ganar *${bank}* puntos 🎰`;
+
+          await reply(msg, resultMsg);
+          return;
+        }
+
+        const value = calculateHandValue(game.game.playerHand);
+        let hitMsg = `🎴 *Nueva carta*\n\n`;
+        hitMsg += `👤 *Tu mano*: ${formatHand(game.game.playerHand)} = *${value}*\n\n`;
+        hitMsg += `Opciones:\n` +
+          `• \`${pfx}bj hit\` - Pedir otra carta\n` +
+          `• \`${pfx}bj stand\` - Plantarse`;
+
+        await reply(msg, hitMsg);
+        return;
+      }
+
+      // Player stands
+      game.game.playerStand = true;
+      dealerPlay(game.game);
+
+      const { result: resultText, winner } = formatGameResult(game.game);
+      const playerValue = calculateHandValue(game.game.playerHand);
+      const dealerValue = calculateHandValue(game.game.dealerHand);
+
+      let finalMsg = `${resultText}\n\n`;
+
+      if (winner === 'player') {
+        // Player wins - double the bet
+        const winnings = game.bet * 2;
+        const bank = storage.getBlackjackBank();
+        let totalWin = winnings;
+
+        if (bank > 0) {
+          totalWin = winnings + bank;
+          storage.resetBlackjackBank();
+          finalMsg += `🏆 *¡GANASTE EL BANCO!*\n`;
+          finalMsg += `💰 *Tu premio*: ${winnings} (apuesta) + ${bank} (banco) = *${totalWin}* puntos 💎`;
+        } else {
+          finalMsg += `🎉 *¡GANASTE!*\n`;
+          finalMsg += `💰 *Tu premio*: ${winnings} puntos (apuesta duplicada)`;
+        }
+
+        storage.addBonusPoints(number, name, totalWin, `Ganó blackjack (${totalWin} puntos)`);
+      } else if (winner === 'dealer') {
+        // Player loses - bet goes to bank
+        const bank = storage.addToBlackjackBank(game.bet);
+        storage.addBonusPoints(number, name, -game.bet, `Perdió blackjack (${game.bet} puntos)`);
+        finalMsg += `💔 *¡PERDISTE!*\n`;
+        finalMsg += `💰 *Apuesta perdida:* -${game.bet} puntos\n`;
+        finalMsg += `🏦 *Banco del grupo:* ${bank} puntos`;
+      } else {
+        // Push (tie)
+        finalMsg += `🤝 *¡EMPATE!*\n`;
+        finalMsg += `💰 *Tu apuesta se devuelve:* +${game.bet} puntos`;
+        storage.addBonusPoints(number, name, game.bet, `Empate en blackjack`);
+      }
+
+      delete blackjackGames[number];
+      await reply(msg, finalMsg);
+      return;
+    }
+
+    // Start new blackjack game
+    if (cmd === 'blackjack' || cmd === 'bj') {
+      // Only proceed if there's a bet amount (i.e., not hit/stand)
+      if (args === 'hit' || args === 'stand' || args === 'h' || args === 's') {
+        await reply(msg, '❌ No hay una partida activa. Inicia una con `!bj <apuesta>`');
+        return;
+      }
+
+      const stats = storage.getStats()[number] || {};
+      const userPoints = stats.points || 0;
+
+      // Check if user has enough points
+      if (userPoints <= 0) {
+        await reply(msg, '❌ Necesitas tener puntos positivos para jugar blackjack.');
+        return;
+      }
+
+      // Parse bet amount
+      const betStr = args.trim();
+      if (!betStr) {
+        await reply(msg, `♠️ *¡BIENVENIDO AL BLACKJACK!* ♠️\n\n` +
+          `Uso: \`${pfx}blackjack <apuesta>\` o \`${pfx}bj <apuesta>\`\n\n` +
+          `Ejemplos:\n` +
+          `• \`${pfx}bj 5\` → Juega con 5 puntos\n` +
+          `• \`${pfx}blackjack 10\` → Juega con 10 puntos\n\n` +
+          `📊 *Tu saldo actual:* ${userPoints} puntos\n` +
+          `🏦 *Banco del grupo:* ${storage.getBlackjackBank()} puntos\n\n` +
+          `*Reglas:*\n` +
+          `• Si ganas, duplicas tu apuesta\n` +
+          `• Si pierdes, tu apuesta va al banco\n` +
+          `• El siguiente jugador intenta ganar todo el banco\n` +
+          `• ¡Buena suerte!`);
+        return;
+      }
+
+      const bet = parseInt(betStr);
+      if (isNaN(bet) || bet <= 0) {
+        await reply(msg, '⚠️ La apuesta debe ser un número positivo.');
+        return;
+      }
+
+      if (bet > userPoints) {
+        await reply(msg, `⚠️ No tienes suficientes puntos. Tu saldo: ${userPoints}, apuesta: ${bet}`);
+        return;
+      }
+
+      // Start game
+      const gameState = playBlackjack();
+      blackjackGames[number] = { game: gameState, bet, userName: name, timestamp: Date.now() };
+
+      const playerValue = calculateHandValue(gameState.playerHand);
+      const dealerValue = calculateHandValue([gameState.dealerHand[0]]);
+
+      let gameMsg = `♠️ *BLACKJACK* ♠️\n\n`;
+      gameMsg += `👤 *Jugador*: ${formatHand(gameState.playerHand)} = *${playerValue}*\n`;
+      gameMsg += `🎴 *Crupier*: ${formatHand(gameState.dealerHand, true)} = *${dealerValue}*\n\n`;
+      gameMsg += `💰 *Apuesta:* ${bet} puntos\n`;
+      gameMsg += `🏦 *Banco:* ${storage.getBlackjackBank()} puntos\n\n`;
+
+      if (playerValue === 21) {
+        gameMsg += `🎉 *¡BLACKJACK NATURAL!*\n\n`;
+        gameMsg += `Responde con \`${pfx}bj stand\` para reclamar tu premio 🏆`;
+      } else {
+        gameMsg += `Opciones:\n` +
+          `• \`${pfx}bj hit\` - Pedir carta\n` +
+          `• \`${pfx}bj stand\` - Plantarse`;
+      }
+
+      await reply(msg, gameMsg);
+      return;
+    }
     await reply(msg, `❓ Comando desconocido: \`${pfx}${cmd}\`\nEscribe \`!ayuda\` para ver los comandos disponibles.`);
 
   } catch (err) {

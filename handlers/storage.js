@@ -553,7 +553,7 @@ function isMuted(number) {
 
 function cleanExpiredMutes() {
   const db = getDb();
-  db.prepare('DELETE FROM muted_users WHERE datetime(unmutedAt) <= datetime("now")').run();
+  db.prepare('DELETE FROM muted_users WHERE datetime(unmutedAt) <= datetime(\'now\')').run();
 }
 
 // ─── Questions ────────────────────────────────────────────────────────────────
@@ -779,6 +779,32 @@ function getDadoCooldownRemaining(userId, cooldownSeconds = 30) {
   return Math.max(0, cooldownSeconds - elapsedSeconds);
 }
 
+// ─── Blackjack Bank ───────────────────────────────────────────────────────────
+
+function getBlackjackBank() {
+  const db = getDb();
+  const row = db.prepare('SELECT bank_amount FROM blackjack_bank WHERE id = ?').get('current');
+  return row ? row.bank_amount : 0;
+}
+
+function addToBlackjackBank(amount) {
+  const db = getDb();
+  const current = getBlackjackBank();
+  db.prepare(`
+    INSERT OR REPLACE INTO blackjack_bank (id, bank_amount, last_updated)
+    VALUES (?, ?, ?)
+  `).run('current', current + amount, new Date().toISOString());
+  return current + amount;
+}
+
+function resetBlackjackBank() {
+  const db = getDb();
+  db.prepare(`
+    INSERT OR REPLACE INTO blackjack_bank (id, bank_amount, last_updated)
+    VALUES (?, ?, ?)
+  `).run('current', 0, new Date().toISOString());
+}
+
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
 module.exports = {
@@ -801,4 +827,5 @@ module.exports = {
   log,
   getScheduleOverrides, getOverrideForDate, saveScheduleOverride, deleteScheduleOverride,
   getDado, saveDadoRoll, checkDadoCooldown, getDadoCooldownRemaining,
+  getBlackjackBank, addToBlackjackBank, resetBlackjackBank,
 };

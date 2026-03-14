@@ -264,6 +264,15 @@ function initializeSchema() {
     );
   `);
 
+  // Blackjack bank (communal pot)
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS blackjack_bank (
+      id TEXT PRIMARY KEY DEFAULT 'current',
+      bank_amount INTEGER DEFAULT 0,
+      last_updated TEXT
+    );
+  `);
+
   console.log('✅ Database schema initialized');
 }
 
