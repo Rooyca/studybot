@@ -5,3 +5,11 @@ node_modules/
 data/
 www/
 config.json
+# SQLite database files
+study-bot.db
+study-bot.db-shm
+study-bot.db-wal
+
+# Backup directories
+data.backup/
+handlers/storage.js.backup

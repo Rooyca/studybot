@@ -55,6 +55,8 @@ const qrcode = require('qrcode-terminal');
 
 const config = require('./config.json');
 
+const { initializeSchema, closeDb } = require('./handlers/db');
+const { migrateData } = require('./handlers/migrate');
 const storage    = require('./handlers/storage');
 const { startCrons, checkAndSendReminders, checkAndSendTodayReminders, sendWeeklySummary, parseReminderCommand, formatDate, daysDiff, todayBogota, getDayOfWeek } = require('./handlers/reminders');
 const { runModeration, formatTime } = require('./handlers/moderation');
@@ -2797,6 +2799,11 @@ client.on('message', async msg => {
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 
+// Initialize SQLite database
+console.log('[INIT] Initializing SQLite database...');
+initializeSchema();
+migrateData();
+
 // Initialize storage cache before starting client
 storage.initializeCache();
 
@@ -2804,8 +2811,9 @@ client.initialize();
 
 // Graceful shutdown
 process.on('SIGINT', () => {
-  console.log('\n[SHUTDOWN] Flushing data to disk...');
+  console.log('\n[SHUTDOWN] Closing database...');
   storage.flush();
+  closeDb();
   process.exit(0);
 });
 
