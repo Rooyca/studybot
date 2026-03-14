@@ -72,6 +72,21 @@
     }
   ],
 
+  "schedule": {
+    "Monday": [
+      {"subject": "Algoritmos I", "start": "08:00", "end": "10:00", "professor": "Dr. García", "room": "Aula 101"},
+      {"subject": "Cálculo I", "start": "14:00", "end": "16:00", "professor": "Dra. López", "room": "Aula 201"}
+    ],
+    "Tuesday": [
+      {"subject": "Cálculo I", "start": "09:00", "end": "11:00", "professor": "Dra. López", "room": "Aula 201"}
+    ],
+    "Wednesday": [],
+    "Thursday": [],
+    "Friday": [],
+    "Saturday": [],
+    "Sunday": []
+  },
+
   "faq": [],
 
   "activityCheck": {
@@ -80,5 +95,14 @@
     "removeAfterDays": 7,
     "warningMessage": "⚠️ Hola {name}, llevas más de {days} días sin enviar mensajes en el grupo de estudio. Si no participas en los próximos 7 días serás removido automáticamente. ¡Te esperamos! 😊",
     "removalMessage": "👋 Hola {name}, has sido removido del grupo de estudio por inactividad. ¡Puedes pedir que te vuelvan a agregar cuando quieras!"
+  },
+
+  "dado": {
+    "enabled": true,
+    "cooldown": 10,
+    "pointsWin": 2,
+    "pointsLose": 1,
+    "winningMessage": "🎉 *¡GANADOR!* 🎉\n\n✨ @{name} ha sacado un {number} en el !dado 🎰\n\n¡Felicitaciones! 🏆 Has ganado {points} puntos.",
+    "rollMessage": "🎲 @{name} sacó un {number}"
   }
 }

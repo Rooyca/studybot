@@ -66,39 +66,49 @@ const SIMILARITY_THRESHOLD = 0.25;
 // ─── AI answer checker ─────────────────────────────────────────────────────────
 
 /**
- * Uses Gemini to evaluate whether the student's answer is semantically correct.
+ * Uses Groq to evaluate whether the student's answer is semantically correct.
  * Returns { correct: boolean, reason: string } or throws on failure.
  */
 async function checkAnswerWithAI(question, correctAnswer, studentAnswer) {
   const groq = getGroq();
   if (!groq) throw new Error('No API key configured');
 
-  const response = await groq.chat.completions.create({
-    model: 'llama-3.3-70b-versatile',
-    temperature: 0,
-    max_tokens: 150,
-    response_format: { type: 'json_object' },
-    messages: [
-      {
-        role: 'system',
-        content:
-          'Eres un evaluador de respuestas para un grupo de estudio universitario. ' +
-          'Determina si la respuesta del estudiante es correcta o suficientemente equivalente a la respuesta esperada, aunque esté formulada de forma diferente. ' +
-          'Responde ÚNICAMENTE con JSON: {"correct": true/false, "reason": "breve explicación en español"}',
-      },
-      {
-        role: 'user',
-        content:
-          `Pregunta: ${question}\n` +
-          `Respuesta esperada: ${correctAnswer}\n` +
-          `Respuesta del estudiante: ${studentAnswer}\n\n` +
-          '¿Es correcta la respuesta del estudiante?',
-      },
-    ],
-  });
+  try {
+    const response = await Promise.race([
+      groq.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        temperature: 0,
+        max_tokens: 150,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Eres un evaluador de respuestas para un grupo de estudio universitario. ' +
+              'Determina si la respuesta del estudiante es correcta o suficientemente equivalente a la respuesta esperada, aunque esté formulada de forma diferente. ' +
+              'Responde ÚNICAMENTE con JSON: {"correct": true/false, "reason": "breve explicación en español"}',
+          },
+          {
+            role: 'user',
+            content:
+              `Pregunta: ${question}\n` +
+              `Respuesta esperada: ${correctAnswer}\n` +
+              `Respuesta del estudiante: ${studentAnswer}\n\n` +
+              '¿Es correcta la respuesta del estudiante?',
+          },
+        ],
+      }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('AI API timeout (5s)')), 5000)
+      )
+    ]);
 
-  const parsed = JSON.parse(response.choices[0].message.content.trim());
-  return { correct: Boolean(parsed.correct), reason: parsed.reason || '' };
+    const parsed = JSON.parse(response.choices[0].message.content.trim());
+    return { correct: Boolean(parsed.correct), reason: parsed.reason || '' };
+  } catch (err) {
+    console.warn('[AI CHECK] Fallback to similarity:', err.message);
+    throw err;
+  }
 }
 
 // ─── Core functions ────────────────────────────────────────────────────────────
@@ -148,7 +158,17 @@ async function sendScheduledQuestion(client, config) {
   const { message = '🤔 *Pregunta del día:*\n\n{question}\n\n_Responde citando este mensaje para ganar puntos._' } = config.dailyQuestions;
   const groupText = message.replace('{question}', `${questionText}\n\n${diffLabel} — *${points} pts*`);
 
-  const sentMsg = await client.sendMessage(config.groupId, groupText);
+  // Get all participants to mention everyone
+  let sentMsg;
+  try {
+    const chat = await client.getChatById(config.groupId);
+    const mentions = chat.participants.map(p => p.id._serialized);
+    sentMsg = await client.sendMessage(config.groupId, groupText, { mentions });
+  } catch (error) {
+    console.error('[DAILY QUESTION] Error mencionando a todos:', error.message);
+    // Fallback: send without mentions if it fails
+    sentMsg = await client.sendMessage(config.groupId, groupText);
+  }
   updateQuestion(saved.id, { groupMsgId: sentMsg.id._serialized });
 
   console.log(`[DAILY QUESTION] Enviada [${difficulty}/${points}pts]: "${questionText.slice(0, 60)}…"`);

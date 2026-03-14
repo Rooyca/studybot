@@ -2,7 +2,7 @@
 
 const cron = require('node-cron');
 const { getActiveReminders, getReminders } = require('./storage');
-const { checkInactivity } = require('./activity');
+const { checkInactivity, pruneActivityData } = require('./activity');
 const { sendScheduledQuestion } = require('./questions');
 
 const TZ = 'America/Bogota';
@@ -106,6 +106,11 @@ function startCrons(client, config) {
   // Daily inactivity check at 10:00
   cron.schedule('0 10 * * *', () => checkInactivity(client, config), { timezone: TZ });
 
+  // Weekly activity data pruning (Sundays at 2:00 AM to remove inactive users >90 days)
+  cron.schedule('0 2 * * 0', () => {
+    pruneActivityData();
+  }, { timezone: TZ });
+
   // "Today is due" reminders: repeated throughout the day
   const tr = config.reminderTodayRepeat;
   if (tr && tr.enabled && config.reminderDays.includes(0)) {
@@ -162,4 +167,10 @@ function parseReminderCommand(args) {
   return { title, date: dateStr, description };
 }
 
-module.exports = { startCrons, checkAndSendReminders, checkAndSendTodayReminders, sendWeeklySummary, parseReminderCommand, formatDate, daysDiff };
+function getDayOfWeek(dateStr) {
+  const date = new Date(dateStr + 'T00:00:00');
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  return days[date.getUTCDay()];
+}
+
+module.exports = { startCrons, checkAndSendReminders, checkAndSendTodayReminders, sendWeeklySummary, parseReminderCommand, formatDate, daysDiff, todayBogota, getDayOfWeek };

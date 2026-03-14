@@ -69,4 +69,29 @@ function buildUserStats(number, isSelf = true) {
   );
 }
 
-module.exports = { buildLeaderboard, buildUserStats };
+/**
+ * Genera una lista de usuarios con puntos negativos (los que deben dar el premio)
+ */
+function buildNegativePointsLeaderboard(limit = 10) {
+  const stats = getStats();
+  const negativeUsers = Object.entries(stats)
+    .map(([number, data]) => ({ number, ...data }))
+    .filter(user => user.totalPoints < 0)
+    .sort((a, b) => a.totalPoints - b.totalPoints);
+
+  if (!negativeUsers.length) {
+    return '📊 *Usuarios con puntos negativos*\n\n¡Felicidades! No hay usuarios con puntos negativos. Todos tienen buen comportamiento 🎉';
+  }
+
+  const lines = negativeUsers.slice(0, limit).map((user, i) => {
+    const debtBar = buildBar(Math.abs(user.totalPoints));
+    return (
+      `${i + 1}. *${user.name || user.number}*\n` +
+      `${debtBar} ${user.totalPoints} pts`
+    );
+  });
+
+  return `📊 *Usuarios con puntos negativos (deben dar el premio)*\n\n${lines.join('\n\n')}\n\n_Total con deuda: ${negativeUsers.length} usuarios_`;
+}
+
+module.exports = { buildLeaderboard, buildUserStats, buildNegativePointsLeaderboard };

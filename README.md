@@ -78,6 +78,44 @@ Configurá las materias del cuatrimestre para que los usuarios puedan proponer t
 - `driveFolder` — URL de Google Drive que se autocompleta cuando un usuario propone una tarea
 - `notesFolder` — URL de Google Drive que se autocompleta cuando un usuario propone apuntes
 
+### Horario semanal (`config.schedule`)
+
+Configurá el horario semanal normal del grupo. Cada día puede tener varias clases con su hora de inicio, fin, profesor y aula:
+
+```json
+"schedule": {
+  "Monday": [
+    {"subject": "Algoritmos I", "start": "08:00", "end": "10:00", "professor": "Dr. García", "room": "Aula 101"},
+    {"subject": "Cálculo I", "start": "14:00", "end": "16:00", "professor": "Dra. López", "room": "Aula 201"}
+  ],
+  "Tuesday": [
+    {"subject": "Cálculo I", "start": "09:00", "end": "11:00", "professor": "Dra. López", "room": "Aula 201"}
+  ],
+  "Wednesday": [],
+  "Thursday": [],
+  "Friday": [],
+  "Saturday": [],
+  "Sunday": []
+}
+```
+
+- `subject` — nombre de la materia
+- `start` — hora de inicio (formato HH:MM)
+- `end` — hora de fin (formato HH:MM)
+- `professor` — nombre del profesor
+- `room` — aula o lugar
+
+**Comandos relacionados:**
+- `!hoy` — Ver el horario de hoy + tareas/recordatorios para hoy
+- `!editar-horario "subject" [start] [end] [YYYY-MM-DD] [professor] [room]` — **(Admin)** Cambiar la hora/profesor/aula de la clase para un día específico
+  - Ej: `!editar-horario "Algoritmos I" 19:00 21:00 2025-03-15 "Dr. García" "Aula 101"`
+- `!editar-horario "subject" cancel [YYYY-MM-DD]` — **(Admin)** Cancelar clase para un día (cuando el profesor avisa que no hay clase)
+  - Ej: `!editar-horario "Algoritmos I" cancel 2025-03-15`
+- `!editar-horario "subject" room [YYYY-MM-DD] "new-room"` — **(Admin)** Cambiar solo la sala/aula para un día
+  - Ej: `!editar-horario "Algoritmos I" room 2025-03-15 "Aula 205"`
+
+**Nota:** Los cambios con `!editar-horario` son temporales — solo afectan ese día específico. La próxima semana vuelve a usarse el horario normal del `config.schedule`.
+
 ### Banco de preguntas del día (`data/daily-questions.json`)
 
 Cada entrada del banco es un objeto con la pregunta, su respuesta de referencia y la dificultad:

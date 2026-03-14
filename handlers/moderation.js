@@ -3,11 +3,15 @@
 const { isMuted, cleanExpiredMutes, log } = require('./storage');
 
 let _wordRegexes = null;
+let _cachedWords = null;
 
 function getWordRegexes(words) {
-  if (!_wordRegexes) {
-    _wordRegexes = words.map(w => ({ word: w, re: new RegExp(`\\b${w.toLowerCase()}\\b`, 'i') }));
+  const wordsKey = JSON.stringify(words.sort());
+  if (_wordRegexes && _cachedWords === wordsKey) {
+    return _wordRegexes;
   }
+  _cachedWords = wordsKey;
+  _wordRegexes = words.map(w => ({ word: w, re: new RegExp(`\\b${w.toLowerCase()}\\b`, 'i') }));
   return _wordRegexes;
 }
 

@@ -18,8 +18,10 @@
 //   !proponer-recurso           — Proponer un recurso para revisión
 //   !faq                        — Ver preguntas frecuentes
 //   !tabla                      — Ver leaderboard
+//   !ntabla                     — Ver usuarios con puntos negativos (deudores)
 //   !puntos [@mention o id]         — Ver estadísticas propias o de otro usuario
 //   !donar-puntos [@mention o id] N  — Donar N puntos propios a otro usuario
+//   !atacar [ID] N                   — Gastar N puntos para restar N/3 a otro usuario (solo IDs)
 //   !premio                     — Ver el premio actual del leaderboard
 //   (responde citando la pregunta del día para ganar puntos)
 //   !recordatorio "T" YYYY-MM-DD [desc]   — Agregar recordatorio
@@ -54,9 +56,9 @@ const qrcode = require('qrcode-terminal');
 const config = require('./config.json');
 
 const storage    = require('./handlers/storage');
-const { startCrons, checkAndSendReminders, checkAndSendTodayReminders, sendWeeklySummary, parseReminderCommand, formatDate, daysDiff } = require('./handlers/reminders');
+const { startCrons, checkAndSendReminders, checkAndSendTodayReminders, sendWeeklySummary, parseReminderCommand, formatDate, daysDiff, todayBogota, getDayOfWeek } = require('./handlers/reminders');
 const { runModeration, formatTime } = require('./handlers/moderation');
-const { buildLeaderboard, buildUserStats }  = require('./handlers/stats');
+const { buildLeaderboard, buildUserStats, buildNegativePointsLeaderboard }  = require('./handlers/stats');
 const { sendScheduledQuestion, processAnswer, buildQuestionsList, parseDifficulty, DIFFICULTY_POINTS, DIFFICULTY_LABELS } = require('./handlers/questions');
 const { checkInactivity } = require('./handlers/activity');
 
@@ -178,7 +180,8 @@ function argsAfterTarget(args, mentionedIds) {
 const HELP_PUBLIC = `
 📚 *COMANDOS* 📚
 
-📅 *Recordatorios*
+📅 *Horario y Recordatorios*
+• \`!hoy\` — Ver el horario de hoy + tareas para hoy
 • \`!recordatorios\` / \`!r\` — Ver recordatorios
 • \`!proponer-recordatorio / !pr "Título" YYYY-MM-DD [desc]\` — Proponer un recordatorio
 
@@ -207,14 +210,27 @@ const HELP_PUBLIC = `
 
 🏆 *Estadísticas*
 • \`!tabla\` — Tabla de puntos del grupo
+• \`!ntabla\` — Ver usuarios con puntos negativos (deudores del premio)
 • \`!puntos\` — Tu puntaje personal
 • \`!puntos @usuario\` — Ver puntaje de otro usuario
 • \`!donar-puntos @usuario N\` — Donar N de tus puntos a otro usuario
+• \`!atacar ID N\` — Gastar N puntos para restar N/3 a otro usuario (solo IDs)
 • \`!premio\` — Ver el premio actual
+
+🎲 *Diversión*
+• \`!dado\` — ¡Lanza los dados! Gana +2 puntos si sacas 10 y -1 punto si sacas 1
 `.trim();
 
 const HELP_ADMIN = `
 👮 *Comandos de Admin*
+
+📅 *Horario*
+\`!editar-horario "subject" [start] [end] [YYYY-MM-DD] [professor] [room]\` — Cambiar tiempo de clase
+\`!editar-horario "subject" cancel [YYYY-MM-DD]\` — Cancelar clase para un día
+\`!editar-horario "subject" room [YYYY-MM-DD] "new-room"\` — Cambiar solo la sala
+_Ej 1: \`!editar-horario "Algoritmos I" 19:00 21:00 2025-03-15 "Dr. García" "Aula 101"\`_
+_Ej 2: \`!editar-horario "Algoritmos I" cancel 2025-03-15\`_
+_Ej 3: \`!editar-horario "Algoritmos I" room 2025-03-15 "Aula 205"\`_
 
 📌 *Recordatorios*
 \`!recordatorio "Título" YYYY-MM-DD [desc]\`
@@ -251,6 +267,8 @@ _(agrega al banco; se publicará automáticamente según el horario configurado)
 
 ⚙️ *Configuración*
 \`!conf\` — Ver configuración actual del bot
+\`!dado-conf\` — Ver configuración del comando !dado
+\`!ccd\` — Activar/Desactivar el comando !dado
 
 🔧 *Pruebas*
 \`!test-recordatorios\`
@@ -263,9 +281,672 @@ _(agrega al banco; se publicará automáticamente según el horario configurado)
 \`!msg [mensaje]\` — Enviar mensaje al grupo como el bot _(solo desde privado)_
 `.trim();
 
+// ─── Command Metadata ─────────────────────────────────────────────────────────
+
+const COMMANDS = {
+  'proponer-recordatorio': {
+    aliases: ['pr'],
+    category: 'Recordatorios',
+    description: 'Proponer un recordatorio para que lo revisen los admins',
+    usage: '"Título" YYYY-MM-DD [descripción]',
+    examples: [
+      '!proponer-recordatorio "Entrega TP3" 2025-12-20',
+      '!proponer-recordatorio "Examen final" 2025-12-25 Prepararse con los apuntes de noviembre',
+      '!pr "Presentación grupal" 2025-12-10 A las 14:00 en el aula 101'
+    ],
+    adminOnly: false
+  },
+  'recordatorio': {
+    aliases: [],
+    category: 'Recordatorios',
+    description: 'Agregar un recordatorio directamente (solo admins)',
+    usage: '"Título" YYYY-MM-DD [descripción]',
+    examples: [
+      '!recordatorio "Publicación semanal" 2025-12-01',
+      '!recordatorio "Cumpleaños de Juan" 2026-01-15 No olvides saludar'
+    ],
+    adminOnly: true
+  },
+  'recordatorios': {
+    aliases: ['r'],
+    category: 'Recordatorios',
+    description: 'Ver todos los recordatorios próximos',
+    usage: '',
+    examples: [
+      '!recordatorios',
+      '!r'
+    ],
+    adminOnly: false
+  },
+  'borrar-recordatorio': {
+    aliases: [],
+    category: 'Recordatorios',
+    description: 'Borrar un recordatorio por su ID (solo admins)',
+    usage: '[id]',
+    examples: [
+      '!borrar-recordatorio abc123',
+      '!borrar-recordatorio def456'
+    ],
+    adminOnly: true
+  },
+  'hoy': {
+    aliases: [],
+    category: 'Horario',
+    description: 'Ver el horario de hoy y las tareas/recordatorios del día',
+    usage: '',
+    examples: [
+      '!hoy'
+    ],
+    adminOnly: false
+  },
+  'editar-horario': {
+    aliases: ['edit-schedule'],
+    category: 'Horario',
+    description: 'Editar el horario de una materia (solo admins)',
+    usage: '"materia" [hora_inicio] [hora_fin] [YYYY-MM-DD] [profesor] [aula]',
+    examples: [
+      '!editar-horario "Algoritmos I" 19:00 21:00 2025-03-15 "Dr. García" "Aula 101"',
+      '!editar-horario "Algoritmos I" cancel 2025-03-15',
+      '!editar-horario "Algoritmos I" room 2025-03-15 "Aula 205"'
+    ],
+    adminOnly: true
+  },
+  'tareas': {
+    aliases: ['t'],
+    category: 'Tareas',
+    description: 'Ver todas las tareas aprobadas',
+    usage: '',
+    examples: [
+      '!tareas',
+      '!t'
+    ],
+    adminOnly: false
+  },
+  'ver-tarea': {
+    aliases: ['vt'],
+    category: 'Tareas',
+    description: 'Ver los detalles completos de una tarea específica',
+    usage: '[número]',
+    examples: [
+      '!ver-tarea 1',
+      '!vt 5'
+    ],
+    adminOnly: false
+  },
+  'buscar-tarea': {
+    aliases: ['bt'],
+    category: 'Tareas',
+    description: 'Buscar tareas por materia, título o descripción',
+    usage: '[consulta]',
+    examples: [
+      '!buscar-tarea Algoritmos',
+      '!bt TP entrega'
+    ],
+    adminOnly: false
+  },
+  'proponer-tarea': {
+    aliases: ['pt'],
+    category: 'Tareas',
+    description: 'Proponer una tarea para que la revisen los admins',
+    usage: 'materia | título | descripción | link',
+    examples: [
+      '!proponer-tarea "Algoritmos I" | "TP 3" | "Implementar árbol binario" | https://ejemplo.com',
+      '!pt "Cálculo" | "Ejercicios 1-10" | "Del capítulo 2 del libro" | link-opcional'
+    ],
+    adminOnly: false
+  },
+  'borrar-tarea': {
+    aliases: [],
+    category: 'Tareas',
+    description: 'Borrar una tarea aprobada (solo admins)',
+    usage: '[id]',
+    examples: [
+      '!borrar-tarea abc123'
+    ],
+    adminOnly: true
+  },
+  'apuntes': {
+    aliases: ['a'],
+    category: 'Apuntes',
+    description: 'Ver todos los apuntes disponibles',
+    usage: '',
+    examples: [
+      '!apuntes',
+      '!a'
+    ],
+    adminOnly: false
+  },
+  'ver-apuntes': {
+    aliases: ['va'],
+    category: 'Apuntes',
+    description: 'Ver los detalles completos de unos apuntes específicos',
+    usage: '[número]',
+    examples: [
+      '!ver-apuntes 1',
+      '!va 3'
+    ],
+    adminOnly: false
+  },
+  'buscar-apuntes': {
+    aliases: ['ba'],
+    category: 'Apuntes',
+    description: 'Buscar apuntes por materia, título o descripción',
+    usage: '[consulta]',
+    examples: [
+      '!buscar-apuntes Física',
+      '!ba termodinámica'
+    ],
+    adminOnly: false
+  },
+  'proponer-apuntes': {
+    aliases: ['pa'],
+    category: 'Apuntes',
+    description: 'Compartir tus apuntes para que los revisen los admins',
+    usage: 'materia | título | descripción | link',
+    examples: [
+      '!proponer-apuntes "Física II" | "Termodinámica" | "Resumen de leyes" | https://drive.google.com/...',
+      '!pa "Cálculo" | "Integrales" | "Notas de la clase" | link'
+    ],
+    adminOnly: false
+  },
+  'borrar-apuntes': {
+    aliases: [],
+    category: 'Apuntes',
+    description: 'Borrar apuntes aprobados (solo admins)',
+    usage: '[id]',
+    examples: [
+      '!borrar-apuntes abc123'
+    ],
+    adminOnly: true
+  },
+  'recursos': {
+    aliases: ['rc'],
+    category: 'Recursos',
+    description: 'Ver todos los recursos disponibles',
+    usage: '',
+    examples: [
+      '!recursos',
+      '!rc'
+    ],
+    adminOnly: false
+  },
+  'ver-recurso': {
+    aliases: ['vrc'],
+    category: 'Recursos',
+    description: 'Ver los detalles completos de un recurso específico',
+    usage: '[número]',
+    examples: [
+      '!ver-recurso 1',
+      '!vrc 2'
+    ],
+    adminOnly: false
+  },
+  'buscar-recurso': {
+    aliases: ['brc'],
+    category: 'Recursos',
+    description: 'Buscar recursos por tipo, título o descripción',
+    usage: '[consulta]',
+    examples: [
+      '!buscar-recurso calculadora',
+      '!brc video tutorial'
+    ],
+    adminOnly: false
+  },
+  'proponer-recurso': {
+    aliases: ['prc'],
+    category: 'Recursos',
+    description: 'Compartir un recurso útil para que lo revisen los admins',
+    usage: 'tipo | título | descripción | link',
+    examples: [
+      '!proponer-recurso "Video" | "Cálculo integral" | "Excelente explicación" | https://youtube.com/...',
+      '!prc "Libro" | "Álgebra lineal" | "Referencia completa" | link'
+    ],
+    adminOnly: false
+  },
+  'borrar-recurso': {
+    aliases: [],
+    category: 'Recursos',
+    description: 'Borrar un recurso aprobado (solo admins)',
+    usage: '[id]',
+    examples: [
+      '!borrar-recurso abc123'
+    ],
+    adminOnly: true
+  },
+  'tabla': {
+    aliases: [],
+    category: 'Estadísticas',
+    description: 'Ver la tabla de puntos (leaderboard) del grupo',
+    usage: '',
+    examples: [
+      '!tabla'
+    ],
+    adminOnly: false
+  },
+  'ntabla': {
+    aliases: [],
+    category: 'Estadísticas',
+    description: 'Ver usuarios con puntos negativos (deben dar el premio)',
+    usage: '',
+    examples: [
+      '!ntabla'
+    ],
+    adminOnly: false
+  },
+  'puntos': {
+    aliases: [],
+    category: 'Estadísticas',
+    description: 'Ver tu puntaje o el de otro usuario',
+    usage: '[@usuario] o [número]',
+    examples: [
+      '!puntos',
+      '!puntos @Juan',
+      '!puntos 5493123456'
+    ],
+    adminOnly: false
+  },
+  'donar-puntos': {
+    aliases: [],
+    category: 'Estadísticas',
+    description: 'Donar puntos tuyos a otro usuario',
+    usage: '@usuario N o número N',
+    examples: [
+      '!donar-puntos @Maria 10',
+      '!donar-puntos 5493654321 5'
+    ],
+    adminOnly: false
+  },
+  'atacar': {
+    aliases: [],
+    category: 'Estadísticas',
+    description: 'Gastar puntos para restar puntos a otro usuario (solo con IDs)',
+    usage: 'ID PUNTOS',
+    examples: [
+      '!atacar 5 9',
+      '!atacar 12 6'
+    ],
+    adminOnly: false
+  },
+  'premio': {
+    aliases: [],
+    category: 'Estadísticas',
+    description: 'Ver el premio actual del leaderboard',
+    usage: '',
+    examples: [
+      '!premio'
+    ],
+    adminOnly: false
+  },
+  'conf-premio': {
+    aliases: [],
+    category: 'Estadísticas',
+    description: 'Configurar el premio del leaderboard (solo admins)',
+    usage: 'nombre | puntos | patrocinador',
+    examples: [
+      '!conf-premio "Pizza party" | 500 | "Pizzería Gino"'
+    ],
+    adminOnly: true
+  },
+  'preguntas': {
+    aliases: [],
+    category: 'Preguntas',
+    description: 'Ver preguntas recientes con sus respuestas',
+    usage: '',
+    examples: [
+      '!preguntas'
+    ],
+    adminOnly: false
+  },
+  'faq': {
+    aliases: [],
+    category: 'Preguntas',
+    description: 'Ver preguntas frecuentes (FAQ)',
+    usage: '',
+    examples: [
+      '!faq'
+    ],
+    adminOnly: false
+  },
+  'add-faq': {
+    aliases: [],
+    category: 'Preguntas',
+    description: 'Agregar una pregunta frecuente (solo admins)',
+    usage: 'palabra1,palabra2 | pregunta | respuesta',
+    examples: [
+      '!add-faq horario,clase | ¿A qué hora es la clase? | Es a las 19:00',
+      '!add-faq examen,fecha | ¿Cuándo es el examen? | El 25 de diciembre'
+    ],
+    adminOnly: true
+  },
+  'del-faq': {
+    aliases: [],
+    category: 'Preguntas',
+    description: 'Borrar una pregunta frecuente (solo admins)',
+    usage: '[id]',
+    examples: [
+      '!del-faq abc123'
+    ],
+    adminOnly: true
+  },
+  'add-pregunta': {
+    aliases: [],
+    category: 'Preguntas',
+    description: 'Agregar una pregunta al banco de preguntas diarias (solo admins)',
+    usage: 'fácil|normal|difícil | pregunta | respuesta',
+    examples: [
+      '!add-pregunta fácil | ¿Cuál es la capital de Francia? | París',
+      '!add-pregunta difícil | ¿Cuál es la integral de x² ? | x³/3 + C'
+    ],
+    adminOnly: true
+  },
+  'publicar-pregunta': {
+    aliases: ['pq'],
+    category: 'Preguntas',
+    description: 'Publicar una pregunta aleatoria ahora (solo admins)',
+    usage: '',
+    examples: [
+      '!publicar-pregunta',
+      '!pq'
+    ],
+    adminOnly: true
+  },
+  'pendientes': {
+    aliases: [],
+    category: 'Moderación',
+    description: 'Ver todas las propuestas esperando aprobación (solo admins)',
+    usage: '',
+    examples: [
+      '!pendientes'
+    ],
+    adminOnly: true
+  },
+  'aprobar': {
+    aliases: [],
+    category: 'Moderación',
+    description: 'Aprobar una propuesta (solo admins)',
+    usage: '[id]',
+    examples: [
+      '!aprobar abc123',
+      '!aprobar xyz789'
+    ],
+    adminOnly: true
+  },
+  'rechazar': {
+    aliases: [],
+    category: 'Moderación',
+    description: 'Rechazar una propuesta con motivo (solo admins)',
+    usage: '[id] [motivo]',
+    examples: [
+      '!rechazar abc123 Enlace roto',
+      '!rechazar xyz789 Ya existe una tarea similar'
+    ],
+    adminOnly: true
+  },
+  'usuarios': {
+    aliases: [],
+    category: 'Configuración',
+    description: 'Ver lista de usuarios con sus IDs (solo admins)',
+    usage: '',
+    examples: [
+      '!usuarios'
+    ],
+    adminOnly: true
+  },
+  'dar-puntos': {
+    aliases: [],
+    category: 'Configuración',
+    description: 'Sumar puntos manualmente a un usuario (solo admins)',
+    usage: '@usuario N [motivo] o número N [motivo]',
+    examples: [
+      '!dar-puntos @Juan 10 Excelente presentación',
+      '!dar-puntos 5493123456 5'
+    ],
+    adminOnly: true
+  },
+  'mutear': {
+    aliases: [],
+    category: 'Moderación',
+    description: 'Mutear a un usuario (solo admins)',
+    usage: '@usuario [minutos] [motivo]',
+    examples: [
+      '!mutear @Carlos 10 Spam',
+      '!mutear 5493654321 Spam persistente'
+    ],
+    adminOnly: true
+  },
+  'desmutear': {
+    aliases: [],
+    category: 'Moderación',
+    description: 'Desmutear a un usuario (solo admins)',
+    usage: '@usuario o número',
+    examples: [
+      '!desmutear @Carlos',
+      '!desmutear 5493654321'
+    ],
+    adminOnly: true
+  },
+  'muteados': {
+    aliases: [],
+    category: 'Moderación',
+    description: 'Ver lista de usuarios muteados (solo admins)',
+    usage: '',
+    examples: [
+      '!muteados'
+    ],
+    adminOnly: true
+  },
+  'conf': {
+    aliases: [],
+    category: 'Configuración',
+    description: 'Ver la configuración actual del bot (solo admins)',
+    usage: '',
+    examples: [
+      '!conf'
+    ],
+    adminOnly: true
+  },
+  'ccd': {
+    aliases: [],
+    category: 'Configuración',
+    description: 'Activar/desactivar el comando !dado (solo admins)',
+    usage: '',
+    examples: [
+      '!ccd'
+    ],
+    adminOnly: true
+  },
+  'test-recordatorios': {
+    aliases: [],
+    category: 'Pruebas',
+    description: 'Forzar revisión de recordatorios (solo admins)',
+    usage: '',
+    examples: [
+      '!test-recordatorios'
+    ],
+    adminOnly: true
+  },
+  'test-actividad': {
+    aliases: [],
+    category: 'Pruebas',
+    description: 'Forzar revisión de inactividad (solo admins)',
+    usage: '',
+    examples: [
+      '!test-actividad'
+    ],
+    adminOnly: true
+  },
+  'resumen-semanal': {
+    aliases: [],
+    category: 'Pruebas',
+    description: 'Forzar envío del resumen semanal (solo admins)',
+    usage: '',
+    examples: [
+      '!resumen-semanal'
+    ],
+    adminOnly: true
+  },
+  'inactivos': {
+    aliases: [],
+    category: 'Pruebas',
+    description: 'Ver usuarios inactivos (solo admins)',
+    usage: '',
+    examples: [
+      '!inactivos'
+    ],
+    adminOnly: true
+  },
+  'todos': {
+    aliases: [],
+    category: 'Difusión',
+    description: 'Enviar mensaje privado a todos los miembros del grupo (solo admins)',
+    usage: '[mensaje]',
+    examples: [
+      '!todos Se adelanta la clase de mañana a las 18:00'
+    ],
+    adminOnly: true
+  },
+  'msg': {
+    aliases: [],
+    category: 'Difusión',
+    description: 'Enviar mensaje al grupo como el bot (solo desde privado, solo admins)',
+    usage: '[mensaje]',
+    examples: [
+      '!msg Recordatorio: Mañana es la entrega final'
+    ],
+    adminOnly: true
+  },
+  'admins': {
+    aliases: [],
+    category: 'Información',
+    description: 'Ver los admins del bot',
+    usage: '',
+    examples: [
+      '!admins'
+    ],
+    adminOnly: false
+  },
+  'dado': {
+    aliases: [],
+    category: 'Diversión',
+    description: 'Lanzar los dados. ¡Si sacas 10 ganas 2 puntos, pero si sacas 1 pierdes 1 punto!',
+    usage: '',
+    examples: [
+      '!dado'
+    ],
+    adminOnly: false
+  },
+  'dado-conf': {
+    aliases: ['dcf'],
+    category: 'Configuración',
+    description: 'Ver la configuración actual del comando !dado',
+    usage: '',
+    examples: [
+      '!dado-conf',
+      '!dcf'
+    ],
+    adminOnly: false
+  },
+  'ayuda': {
+    aliases: ['help'],
+    category: 'Información',
+    description: 'Ver ayuda de todos los comandos o de uno específico',
+    usage: '[comando opcional]',
+    examples: [
+      '!ayuda',
+      '!ayuda proponer-recordatorio',
+      '!help tareas',
+      '!ayuda pr'
+    ],
+    adminOnly: false
+  }
+};
+
+// ─── Helper functions for command help ──────────────────────────────────────
+
+function getCommandByNameOrAlias(query) {
+  const lowerQuery = query.toLowerCase();
+  
+  // Direct match
+  if (COMMANDS[lowerQuery]) {
+    return { name: lowerQuery, ...COMMANDS[lowerQuery] };
+  }
+  
+  // Alias match
+  for (const [cmdName, cmdData] of Object.entries(COMMANDS)) {
+    if (cmdData.aliases.includes(lowerQuery)) {
+      return { name: cmdName, ...cmdData };
+    }
+  }
+  
+  return null;
+}
+
+function formatCommandHelp(cmdName, cmdData) {
+  const title = `*${cmdName}*`;
+  const aliasText = cmdData.aliases.length > 0 ? `Alias: ${cmdData.aliases.map(a => `\`${a}\``).join(', ')}\n` : '';
+  const descText = `${cmdData.description}\n`;
+  const usageText = cmdData.usage ? `Uso: \`${cmdName} ${cmdData.usage}\`\n` : '';
+  const examplesText = cmdData.examples.length > 0 
+    ? `Ejemplos:\n${cmdData.examples.map(ex => `  • \`${ex}\``).join('\n')}\n`
+    : '';
+  const restrictionText = cmdData.adminOnly ? '_Solo administradores_\n' : '';
+  
+  return `${title}\n${aliasText}${descText}${usageText}${examplesText}${restrictionText}`.trim();
+}
+
+function groupCommandsByCategory() {
+  const grouped = {};
+  
+  for (const [cmdName, cmdData] of Object.entries(COMMANDS)) {
+    const category = cmdData.category || 'Otros';
+    if (!grouped[category]) {
+      grouped[category] = [];
+    }
+    grouped[category].push({ name: cmdName, ...cmdData });
+  }
+  
+  return grouped;
+}
+
+function formatAllCommandsHelp(showAdmin = false) {
+  const grouped = groupCommandsByCategory();
+  const categories = Object.keys(grouped).sort();
+  
+  let text = '📚 *COMANDOS* 📚\n\n';
+  
+  for (const category of categories) {
+    // Skip admin commands if user is not admin
+    if (!showAdmin && grouped[category].some(c => c.adminOnly)) {
+      const publicCmds = grouped[category].filter(c => !c.adminOnly);
+      if (publicCmds.length === 0) continue;
+      
+      text += `*${category}*\n`;
+      for (const cmd of publicCmds) {
+        const aliases = cmd.aliases.length > 0 ? ` / ${cmd.aliases.map(a => `\`${a}\``).join(', ')}` : '';
+        text += `• \`${cmd.name}\`${aliases} — ${cmd.description}\n`;
+      }
+      text += '\n';
+    } else if (showAdmin) {
+      text += `*${category}*\n`;
+      for (const cmd of grouped[category]) {
+        const restriction = cmd.adminOnly ? ' 👮' : '';
+        const aliases = cmd.aliases.length > 0 ? ` / ${cmd.aliases.map(a => `\`${a}\``).join(', ')}` : '';
+        text += `• \`${cmd.name}\`${aliases} — ${cmd.description}${restriction}\n`;
+      }
+      text += '\n';
+    }
+  }
+  
+  return text.trim();
+}
+
 // ─── Message handler ──────────────────────────────────────────────────────────
 
 client.on('message', async msg => {
+  const handlerTimeout = setTimeout(() => {
+    console.warn(`[TIMEOUT] Message handler exceeded 30 seconds for msg ${msg.id}`);
+  }, 30000);
+
   try {
     const contact = await msg.getContact();
     const number  = contact.number;
@@ -355,10 +1036,25 @@ client.on('message', async msg => {
     // !ayuda
     // ══════════════════════════════════════════════════════════════════════════
     if (cmd === 'ayuda' || cmd === 'help') {
-      const text = isAdmin(number)
-        ? HELP_PUBLIC + '\n\n' + HELP_ADMIN
-        : HELP_PUBLIC;
-      await reply(msg, text);
+      if (args) {
+        // Specific command help
+        const cmdInfo = getCommandByNameOrAlias(args);
+        if (cmdInfo) {
+          // Check if user has access to this command
+          if (cmdInfo.adminOnly && !isAdmin(number)) {
+            await reply(msg, `❌ El comando \`${args}\` es solo para administradores.`);
+            return;
+          }
+          const helpText = formatCommandHelp(cmdInfo.name, cmdInfo);
+          await reply(msg, helpText);
+        } else {
+          await reply(msg, `❌ No encontré el comando \`${args}\`. Usa \`!ayuda\` para ver todos los comandos disponibles.`);
+        }
+      } else {
+        // All commands help
+        const allCommandsText = formatAllCommandsHelp(isAdmin(number));
+        await reply(msg, allCommandsText);
+      }
       return;
     }
 
@@ -383,6 +1079,228 @@ client.on('message', async msg => {
         return `${when} — *${r.title}*\n   📅 ${formatDate(r.date)}\n   📝 ${r.description || '—'}`;
       });
       await reply(msg, `📋 *Recordatorios (${list.length}):*\n\n${lines.join('\n\n')}`);
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !hoy — Mostrar horario y tareas de hoy
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'hoy') {
+      const today = todayBogota();
+      const dayName = getDayOfWeek(today);
+      
+      // Get schedule from config or schedule overrides
+      const override = storage.getOverrideForDate(today);
+      const normalSchedule = config.schedule && config.schedule[dayName] ? config.schedule[dayName] : [];
+      
+      let response = `📅 *Horario de hoy (${formatDate(today)})*\n`;
+      
+      // Check if there's an override
+      if (override !== null) {
+        response += `_(⚠️ MODIFICADO POR ADMIN)_\n`;
+        // If override is empty array, it means class was cancelled
+        if (override.length === 0) {
+          response += '\n🚫 *SIN CLASES HOY — Clase cancelada por el profesor*';
+        } else {
+          response += '\n';
+          const lines = override.map(c => 
+            `⏰ ${c.start} - ${c.end}\n   📚 ${c.subject}\n   👨‍🏫 ${c.professor}\n   🏫 ${c.room || '—'}`
+          );
+          response += lines.join('\n\n');
+        }
+      } else if (normalSchedule.length > 0) {
+        response += '\n';
+        const lines = normalSchedule.map(c => 
+          `⏰ ${c.start} - ${c.end}\n   📚 ${c.subject}\n   👨‍🏫 ${c.professor}\n   🏫 ${c.room || '—'}`
+        );
+        response += lines.join('\n\n');
+      } else {
+        response += '\n✅ No hay clases hoy\n';
+      }
+      
+      // Add today's reminders/tasks
+      const todayReminders = storage.getReminders().filter(r => r.date === today);
+      if (todayReminders.length > 0) {
+        response += '\n\n📋 *Tareas para hoy:*\n';
+        const taskLines = todayReminders.map(r => 
+          `🚨 *${r.title}*\n   📝 ${r.description || '—'}`
+        );
+        response += taskLines.join('\n\n');
+      }
+      
+      await reply(msg, response);
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !editar-horario — Cambiar horario para un día (cambios de tiempo, cancelar, cambiar aula)
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'editar-horario' || cmd === 'edit-schedule') {
+      if (!isAdmin(number)) {
+        await reply(msg, '🚫 Solo admins pueden editar el horario.');
+        return;
+      }
+      
+      if (!args) {
+        await reply(msg, 
+          `📝 *Uso del comando !editar-horario:*\n\n` +
+          `1️⃣ *Cambiar tiempo de clase:*\n` +
+          `\`!editar-horario "Algoritmos I" 19:00 21:00 2025-03-15 "Dr. García" "Aula 101"\`\n\n` +
+          `2️⃣ *Cancelar clase (sin clase ese día):*\n` +
+          `\`!editar-horario "Algoritmos I" cancel 2025-03-15\`\n\n` +
+          `3️⃣ *Cambiar solo la sala:*\n` +
+          `\`!editar-horario "Algoritmos I" room 2025-03-15 "Aula 205"\``
+        );
+        return;
+      }
+      
+      // Extract subject (first quoted string)
+      const subjMatch = args.match(/"([^"]+)"/);
+      if (!subjMatch) {
+        await reply(msg, '❌ Pon el nombre de la materia entre comillas. Ej: "Algoritmos I"');
+        return;
+      }
+      
+      const subject = subjMatch[1].trim();
+      const restArgs = args.replace(`"${subject}"`, '').trim();
+      const parts = restArgs.split(/\s+/);
+      
+      // ──── CASE 1: Cancel class ────
+      if (parts[0] && parts[0].toLowerCase() === 'cancel') {
+        const dateStr = parts[1];
+        
+        // Validate date
+        if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+          await reply(msg, '❌ Formato de fecha inválido. Usa YYYY-MM-DD (ej: 2025-03-15)');
+          return;
+        }
+        
+        if (isNaN(new Date(dateStr).getTime())) {
+          await reply(msg, '❌ Fecha no válida.');
+          return;
+        }
+        
+        if (daysDiff(dateStr) < 0) {
+          await reply(msg, '❌ No puedes editar el horario de un día pasado.');
+          return;
+        }
+        
+        // Save override with empty array (no classes)
+        storage.saveScheduleOverride(dateStr, []);
+        
+        await reply(msg,
+          `✅ *Clase cancelada para ${formatDate(dateStr)}*\n\n` +
+          `📚 ${subject}\n` +
+          `🚫 Sin clase (cancelada)`
+        );
+        return;
+      }
+      
+      // ──── CASE 2: Change only room ────
+      if (parts[0] && parts[0].toLowerCase() === 'room') {
+        const dateStr = parts[1];
+        const newRoomMatch = restArgs.match(/"([^"]+)"(?!.*")/);
+        const newRoom = newRoomMatch ? newRoomMatch[1].trim() : parts[2];
+        
+        // Validate date
+        if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+          await reply(msg, '❌ Formato de fecha inválido. Usa YYYY-MM-DD (ej: 2025-03-15)');
+          return;
+        }
+        
+        if (isNaN(new Date(dateStr).getTime())) {
+          await reply(msg, '❌ Fecha no válida.');
+          return;
+        }
+        
+        if (daysDiff(dateStr) < 0) {
+          await reply(msg, '❌ No puedes editar el horario de un día pasado.');
+          return;
+        }
+        
+        if (!newRoom) {
+          await reply(msg, '❌ Especifica la nueva sala. Ej: `!editar-horario "Algoritmos I" room 2025-03-15 "Aula 205"`');
+          return;
+        }
+        
+        // Get the current schedule for that day
+        const override = storage.getOverrideForDate(dateStr);
+        const dayName = getDayOfWeek(dateStr);
+        const normalSchedule = config.schedule && config.schedule[dayName] ? config.schedule[dayName] : [];
+        const currentSchedule = override || normalSchedule;
+        
+        // Find and update the class
+        const classToChange = currentSchedule.find(c => c.subject.toLowerCase() === subject.toLowerCase());
+        if (!classToChange) {
+          await reply(msg, `❌ No encontré la clase "${subject}" en el horario de ${formatDate(dateStr)}`);
+          return;
+        }
+        
+        // Update the class with new room
+        const updatedSchedule = currentSchedule.map(c => 
+          c.subject.toLowerCase() === subject.toLowerCase() 
+            ? { ...c, room: newRoom }
+            : c
+        );
+        
+        storage.saveScheduleOverride(dateStr, updatedSchedule);
+        
+        await reply(msg,
+          `✅ *Sala modificada para ${formatDate(dateStr)}*\n\n` +
+          `📚 ${subject}\n` +
+          `⏰ ${classToChange.start} - ${classToChange.end}\n` +
+          `👨‍🏫 ${classToChange.professor}\n` +
+          `🏫 ${newRoom} _(cambio de ${classToChange.room})_`
+        );
+        return;
+      }
+      
+      // ──── CASE 3: Full schedule change (time + professor + room) ────
+      const start = parts[0];
+      const end = parts[1];
+      const dateStr = parts[2];
+      const profMatch = restArgs.match(/"([^"]*)"(?!.*")/);
+      const professor = profMatch ? profMatch[1].trim() : parts[4] || '—';
+      const room = parts[5] || '—';
+      
+      // Validate time format (HH:MM)
+      if (!start || !/^\d{1,2}:\d{2}$/.test(start) || !end || !/^\d{1,2}:\d{2}$/.test(end)) {
+        await reply(msg, '❌ Formato de hora inválido. Usa HH:MM (ej: 19:00)');
+        return;
+      }
+      
+      // Validate date format
+      if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        await reply(msg, '❌ Formato de fecha inválido. Usa YYYY-MM-DD (ej: 2025-03-15)');
+        return;
+      }
+      
+      if (isNaN(new Date(dateStr).getTime())) {
+        await reply(msg, '❌ Fecha no válida.');
+        return;
+      }
+      
+      if (daysDiff(dateStr) < 0) {
+        await reply(msg, '❌ No puedes editar el horario de un día pasado.');
+        return;
+      }
+      
+      // Save override (replace the entire schedule for this day with this class)
+      storage.saveScheduleOverride(dateStr, [{
+        subject,
+        start,
+        end,
+        professor,
+        room
+      }]);
+      
+      await reply(msg,
+        `✅ *Horario modificado para ${formatDate(dateStr)}*\n\n` +
+        `⏰ ${start} - ${end}\n` +
+        `📚 ${subject}\n` +
+        `👨‍🏫 ${professor}\n` +
+        `🏫 ${room}`
+      );
       return;
     }
 
@@ -1151,6 +2069,14 @@ client.on('message', async msg => {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
+    // !ntabla — Usuarios con puntos negativos
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'ntabla') {
+      await reply(msg, buildNegativePointsLeaderboard());
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
     // !puntos [@mention o id] — Puntaje personal o de otro usuario
     // ══════════════════════════════════════════════════════════════════════════
     if (cmd === 'puntos') {
@@ -1222,6 +2148,86 @@ client.on('message', async msg => {
           `👤 De: *${senderName}*\n` +
           `⭐ Cantidad: *+${amount} pts*\n\n` +
           `Tu nuevo saldo: *${result.recipient.totalPoints} pts*`
+        );
+      } catch (_) {}
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !atacar <ID> <PUNTOS> — Gastar puntos para restar puntos a otro usuario
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'atacar') {
+      const tokens = args.trim().split(/\s+/);
+      const targetIdStr = tokens[0];
+      const pointsStr = tokens[1];
+
+      if (!targetIdStr || !pointsStr) {
+        await reply(msg, '❌ Uso: `!atacar <ID> <PUNTOS>`\n\nEjemplo: `!atacar 5 9`\n_(Gastarás 9 puntos para restar 3 a la persona con ID 5)_');
+        return;
+      }
+
+      // Parse target ID (activity ID only, no mentions or phone numbers)
+      const targetId = parseInt(targetIdStr);
+      if (isNaN(targetId) || targetId <= 0) {
+        await reply(msg, '❌ El ID debe ser un número positivo.');
+        return;
+      }
+
+      const targetUser = storage.getUserByActivityId(targetId);
+      if (!targetUser) {
+        await reply(msg, '❌ Usuario con ID ' + targetId + ' no encontrado.');
+        return;
+      }
+
+      const targetNum = targetUser.number;
+      if (targetNum === number) {
+        await reply(msg, '❌ No puedes atacarte a ti mismo.');
+        return;
+      }
+
+      const pointsToSpend = parseInt(pointsStr);
+      if (isNaN(pointsToSpend) || pointsToSpend < 3) {
+        await reply(msg, '❌ Debes gastar al menos 3 puntos para atacar.\n\nEjemplo: `!atacar 5 9`');
+        return;
+      }
+
+      // Check if attacker has enough points
+      const attackerStats = storage.getStats()[number];
+      if (!attackerStats || (attackerStats.totalPoints || 0) < pointsToSpend) {
+        const available = attackerStats?.totalPoints || 0;
+        await reply(msg, `❌ No tienes suficientes puntos. Tu saldo actual: *${available} pts*.`);
+        return;
+      }
+
+      // Get names
+      const activityData = storage.getActivity();
+      let attackerName = activityData[number]?.name || number;
+      let targetName = activityData[targetNum]?.name || targetNum;
+
+      // Perform attack
+      const result = storage.attackUser(number, attackerName, targetNum, targetName, pointsToSpend);
+      if (!result) {
+        await reply(msg, '❌ Error al procesar el ataque.');
+        return;
+      }
+
+      storage.log('attack', { attacker: number, target: targetNum, pointsSpent: pointsToSpend, damage: result.damage });
+
+      const damageDealt = result.actualDamage || result.damage;
+      await reply(msg,
+        `⚔️ *¡Ataque exitoso!*\n\n` +
+        `👤 Objetivo: *${targetName}*\n` +
+        `⭐ Puntos gastados: *${pointsToSpend} pts*\n` +
+        `💥 Daño infligido: *${damageDealt} pts*\n\n` +
+        `Tu nuevo saldo: *${result.attacker.totalPoints} pts*`
+      );
+
+      try {
+        await client.sendMessage(`${targetNum}@c.us`,
+          `⚔️ *¡Fuiste atacado!*\n\n` +
+          `👤 Atacante: *${attackerName}*\n` +
+          `💥 Daño recibido: *-${damageDealt} pts*\n\n` +
+          `Tu nuevo saldo: *${result.target.totalPoints} pts*`
         );
       } catch (_) {}
       return;
@@ -1588,15 +2594,223 @@ client.on('message', async msg => {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
+    // !dado — Lanzar dados (1-100), guardar resultado y premiar si saca 100
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'dado') {
+      const dado = config.dado || { enabled: false };
+      if (!dado.enabled) { await reply(msg, '🚫 El comando !dado está deshabilitado.'); return; }
+      
+      // Check cooldown - use dynamic cooldown from config, default to 10 seconds
+      const COOLDOWN_SECONDS = dado.cooldown || 10;
+      if (!storage.checkDadoCooldown(number, COOLDOWN_SECONDS)) {
+        const remainingSeconds = storage.getDadoCooldownRemaining(number, COOLDOWN_SECONDS);
+        // const remainingMinutes = Math.ceil(remainingSeconds / 60);
+        await reply(msg, `⏱️ Intenta nuevamente en ${remainingSeconds} segundo${remainingSeconds !== 1 ? 's' : ''}.`);
+        return;
+      }
+      
+      // Generate random number with user ID and timestamp for better entropy
+      const seed = parseInt(number.slice(-4)) + Date.now() % 10000;
+      const diceRoll = Math.floor((Math.random() + (seed % 1)) * 10) % 10 + 1;
+      
+      storage.saveDadoRoll(number, diceRoll);
+      
+      const stats = storage.getStats()[number] || {};
+      const currentPoints = stats.totalPoints || 0;
+      
+      if (diceRoll === 10) {
+        // WINNING: Add configured points
+        const pointsWon = dado.pointsWin || 2;
+        storage.addBonusPoints(number, name, pointsWon, 'Ganó !dado (10)');
+        
+        const winMsg = (dado.winningMessage || '🎉 *¡GANADOR!* 🎉\n\n✨ @{name} ha sacado un {number} en el !dado 🎰\n\n¡Felicitaciones! 🏆 Has ganado {points} puntos.')
+          .replace('{name}', name)
+          .replace('{number}', diceRoll)
+          .replace('{points}', pointsWon);
+        
+        await reply(msg, winMsg);
+        
+        // Deactivate the game after someone wins
+        // config.dado.enabled = false;
+        // const deactivateMsg = `⛔ *¡JUEGO FINALIZADO!* ⛔\n\n🎰 El comando !dado se ha desactivado automáticamente.\n\n🏆 @${name} fue el ganador y se llevó los puntos.\n\n¡Felicitaciones! 🎊`;
+        // await reply(msg, deactivateMsg);
+        
+      } else if (diceRoll === 1) {
+        // LOSING: Lose configured points
+        const pointsLost = -(dado.pointsLose || 1);
+        storage.addBonusPoints(number, name, pointsLost, 'Perdió !dado (1)');
+        
+        const loseMsg = `💔 *¡PERDISTE!* 💔\n\n@${name} sacó un ${diceRoll} y perdió ${dado.pointsLose || 1} punto${(dado.pointsLose || 1) !== 1 ? 's' : ''}. 😢`;
+        await reply(msg, loseMsg);
+      } else {
+        // Regular roll
+        const rollMsg = (dado.rollMessage || '🎲 *{number}*')
+          .replace('{name}', name)
+          .replace('{number}', diceRoll);
+        
+        await reply(msg, rollMsg);
+      }
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !dado-conf — Show !dado configuration
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'dado-conf' || cmd === 'dcf') {
+      const dado = config.dado || { enabled: false };
+      
+      const statusText = dado.enabled ? '✅ *ACTIVO*' : '❌ *DESACTIVO*';
+      const cooldown = dado.cooldown || 10;
+      const pointsWin = dado.pointsWin || 2;
+      const pointsLose = dado.pointsLose || 1;
+      
+      const confMsg = `🎲 *Configuración del comando !dado*\n\n` +
+        `📊 *Estado:* ${statusText}\n` +
+        `⏱️ *Cooldown entre lanzamientos:* ${cooldown} segundo${cooldown !== 1 ? 's' : ''}\n` +
+        `🏆 *Puntos por ganar (sacar 10):* +${pointsWin}\n` +
+        `💔 *Puntos por perder (sacar 1):* -${pointsLose}`;
+      
+      await reply(msg, confMsg);
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !ccd — Toggle !dado command on/off (ADMIN)
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'ccd') {
+      if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
+      
+      if (!config.dado) { config.dado = { enabled: true }; }
+      
+      const isCurrentlyEnabled = config.dado.enabled;
+      config.dado.enabled = !isCurrentlyEnabled;
+      
+      let statusMsg;
+      if (config.dado.enabled) {
+        statusMsg = `🎲 *Comando !dado ACTIVADO* ✅\n\n` +
+          `📋 *REGLAS DEL JUEGO:*\n\n` +
+          `🎰 *¿Cómo funciona?*\n` +
+          `• Escribe \`!dado\` para lanzar los dados\n` +
+          `• Obtendrás un número del 1 al 10\n` +
+          `• Espera 60 segundos entre cada lanzamiento\n\n` +
+          `🏆 *Puntuaciones:*\n` +
+          `• *10* → ¡GANAS! +2 Puntos 🎉\n` +
+          `• *1* → ¡PIERDES! -1 Punto 💔\n` +
+          `⏱️ *Cooldown:* 60 segundos entre lanzamientos para evitar spam\n\n` +
+          `¡Que comience la diversión! 🎊`;
+      } else {
+        statusMsg = `🎲 *Comando !dado DESACTIVADO* ❌\n\n` +
+          `El juego de dados no está disponible en este momento.\n` +
+          `Los usuarios no podrán usar \`!dado\` hasta que sea reactivado.`;
+      }
+      
+      await reply(msg, statusMsg);
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !ccdt — Set !dado cooldown seconds (ADMIN)
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'ccdt') {
+      if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
+      
+      if (!args[0]) {
+        await reply(msg, '⚠️ Uso: `!ccdt <segundos>`\nEjemplo: `!ccdt 60` (establece el cooldown a 60 segundos)');
+        return;
+      }
+      
+      const seconds = parseInt(args);
+      
+      if (isNaN(seconds) || seconds <= 0) {
+        await reply(msg, '⚠️ Debes especificar un número válido de segundos (mayor a 0).');
+        return;
+      }
+      
+      if (!config.dado) { config.dado = { enabled: false }; }
+      const oldCooldown = config.dado.cooldown || 10;
+      config.dado.cooldown = seconds;
+      
+      const statusMsg = `⏱️ *Cooldown del !dado actualizado* ✅\n\n` +
+        `El tiempo de espera entre lanzamientos cambió de *${oldCooldown}s* a *${seconds}s*.`;
+      
+      await reply(msg, statusMsg);
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // !ccpt — Set !dado winning/losing points (ADMIN)
+    // ══════════════════════════════════════════════════════════════════════════
+    if (cmd === 'ccpt') {
+      if (!isAdmin(number)) { await reply(msg, '🚫 Solo admins.'); return; }
+      
+      if (!args) {
+        await reply(msg, '⚠️ Uso: `!ccpt w <puntos>` o `!ccpt l <puntos>`\n' +
+          'Ejemplo: `!ccpt w 5` (ganar 5 puntos en 10) o `!ccpt l 2` (perder 2 puntos en 1)');
+        return;
+      }
+      
+      const parts = args.trim().split(/\s+/);
+      const type = parts[0]?.toLowerCase();
+      const points = parseInt(parts[1]);
+      
+      if (!['w', 'l'].includes(type)) {
+        await reply(msg, '⚠️ Tipo inválido. Usa `w` para ganar o `l` para perder.\n' +
+          'Ejemplo: `!ccpt w 5` o `!ccpt l 2`');
+        return;
+      }
+      
+      if (isNaN(points) || points <= 0) {
+        await reply(msg, '⚠️ Debes especificar un número válido de puntos (mayor a 0).');
+        return;
+      }
+      
+      if (!config.dado) { config.dado = { enabled: false }; }
+      
+      if (type === 'w') {
+        const oldWinPoints = config.dado.pointsWin || 2;
+        config.dado.pointsWin = points;
+        const statusMsg = `🎉 *Puntos de victoria actualizados* ✅\n\n` +
+          `Al sacar *10* en el !dado, ahora se ganan *${points} puntos* (antes eran ${oldWinPoints})`;
+        await reply(msg, statusMsg);
+      } else {
+        const oldLosePoints = config.dado.pointsLose || 1;
+        config.dado.pointsLose = points;
+        const statusMsg = `💔 *Puntos de derrota actualizados* ✅\n\n` +
+          `Al sacar *1* en el !dado, ahora se pierden *${points} puntos* (antes eran ${oldLosePoints})`;
+        await reply(msg, statusMsg);
+      }
+      return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
     // Comando desconocido
     // ══════════════════════════════════════════════════════════════════════════
     await reply(msg, `❓ Comando desconocido: \`${pfx}${cmd}\`\nEscribe \`!ayuda\` para ver los comandos disponibles.`);
 
   } catch (err) {
     console.error('[ERROR]', err);
+  } finally {
+    clearTimeout(handlerTimeout);
+    msg = null;
   }
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 
+// Initialize storage cache before starting client
+storage.initializeCache();
+
 client.initialize();
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('\n[SHUTDOWN] Flushing data to disk...');
+  storage.flush();
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('\n[SHUTDOWN] Flushing data to disk...');
+  storage.flush();
+  process.exit(0);
+});

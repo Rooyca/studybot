@@ -1,6 +1,6 @@
 // inactivity warning & auto-removal
 
-const { getActivity, setWarnedAt, log } = require('./storage');
+const { getActivity, write, setWarnedAt, log } = require('./storage');
 
 const MS_PER_DAY = 86400000;
 
@@ -43,6 +43,33 @@ async function checkInactivity(client, config) {
   }
 }
 
+/**
+ * Prunes activity data older than 90 days to prevent unbounded growth.
+ * Should be called weekly.
+ */
+function pruneActivityData() {
+  const activity = getActivity();
+  const cutoffMs = Date.now() - (90 * MS_PER_DAY);
+  
+  let removed = 0;
+  const pruned = {};
+  
+  for (const [number, entry] of Object.entries(activity)) {
+    const lastSeenMs = new Date(entry.lastSeen).getTime();
+    if (lastSeenMs > cutoffMs) {
+      pruned[number] = entry;
+    } else {
+      removed++;
+    }
+  }
+  
+  if (removed > 0) {
+    write('activity', pruned);
+    console.log(`[ACTIVITY] Pruned ${removed} inactive users (>90 days)`);
+    log('activity_pruned', { removedCount: removed });
+  }
+}
+
 async function warnInactiveUser(client, number, name, warnAfterDays, template) {
   const chatId = `${number}@c.us`;
   const text = (template || '⚠️ Hola {name}, llevas más de {days} días sin enviar mensajes en el grupo de estudio. Si no envías un mensaje en los próximos 7 días serás removido del grupo.')
@@ -79,4 +106,4 @@ async function removeInactiveUser(client, config, number, name, template) {
   }
 }
 
-module.exports = { checkInactivity };
+module.exports = { checkInactivity, pruneActivityData };

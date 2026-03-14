@@ -1,4 +1,4 @@
-// handlers/storage.js — capa de persistencia unificada en JSON
+// handlers/storage.js — capa de persistencia unificada en JSON con cache asincrónico
 
 const fs   = require('fs');
 const path = require('path');
@@ -20,23 +20,81 @@ const FILES = {
   logs:             path.join(__dirname, '../data/logs.json'),
   activity:         path.join(__dirname, '../data/activity.json'),
   prize:            path.join(__dirname, '../data/prize.json'),
+  scheduleOverrides: path.join(__dirname, '../data/schedule-overrides.json'),
+  dado:             path.join(__dirname, '../data/dado.json'),
 };
 
-// ─── Core helpers ─────────────────────────────────────────────────────────────
+// ─── In-Memory Cache System ────────────────────────────────────────────────────
 
-function read(key) {
-  const file = FILES[key];
-  if (!fs.existsSync(file)) {
-    const def = (key === 'stats' || key === 'activity' || key === 'prize') ? {} : [];
-    fs.writeFileSync(file, JSON.stringify(def, null, 2));
-    return def;
+const cache = {};
+const isDirty = {};
+let flushTimer = null;
+
+const DEFAULT_VALUES = {
+  stats: {}, activity: {}, prize: {}, scheduleOverrides: {}, dado: {}
+};
+
+// Initialize cache with empty values
+Object.keys(FILES).forEach(key => {
+  cache[key] = DEFAULT_VALUES[key] || [];
+  isDirty[key] = false;
+});
+
+// Periodic flush: batch writes to disk every 30 seconds
+function startFlusher() {
+  if (flushTimer) clearInterval(flushTimer);
+  flushTimer = setInterval(() => {
+    const dirtyKeys = Object.keys(isDirty).filter(k => isDirty[k]);
+    dirtyKeys.forEach(key => {
+      try {
+        fs.writeFileSync(FILES[key], JSON.stringify(cache[key]));
+        isDirty[key] = false;
+      } catch (err) {
+        console.error(`[STORAGE] Error flushing ${key}:`, err.message);
+      }
+    });
+  }, 30000);
+  flushTimer.unref(); // Don't keep process alive
+}
+
+// Initialize caches from disk on startup
+async function initializeCache() {
+  for (const [key, file] of Object.entries(FILES)) {
+    try {
+      if (fs.existsSync(file)) {
+        cache[key] = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      }
+    } catch (err) {
+      console.warn(`[STORAGE] Error loading ${key}, using defaults`);
+      cache[key] = DEFAULT_VALUES[key] || [];
+    }
   }
-  try { return JSON.parse(fs.readFileSync(file, 'utf-8')); }
-  catch { return (key === 'stats' || key === 'activity' || key === 'prize') ? {} : []; }
+  startFlusher();
+}
+
+// Explicit flush on shutdown
+function flush() {
+  if (flushTimer) clearInterval(flushTimer);
+  Object.keys(isDirty).forEach(key => {
+    if (isDirty[key]) {
+      try {
+        fs.writeFileSync(FILES[key], JSON.stringify(cache[key]));
+        isDirty[key] = false;
+      } catch (err) {
+        console.error(`[STORAGE] Error flushing ${key} on shutdown:`, err.message);
+      }
+    }
+  });
+}
+
+// Core read/write functions using cache
+function read(key) {
+  return cache[key] ?? (DEFAULT_VALUES[key] || []);
 }
 
 function write(key, data) {
-  fs.writeFileSync(FILES[key], JSON.stringify(data, null, 2));
+  cache[key] = data;
+  isDirty[key] = true;
 }
 
 function genId() {
@@ -407,6 +465,114 @@ function transferPoints(fromNumber, fromName, toNumber, toName, amount) {
 }
 
 /**
+ * Attack another user: attacker spends X points to subtract floor(X/3) from target.
+ * Checkpoints: Users with >= 50 points can't go below 50. Users with < 50 can go negative.
+ * Returns an object with attack details or null if attack fails.
+ * @param {string} attackerNumber — attacker phone number
+ * @param {string} attackerName   — attacker display name
+ * @param {string} targetNumber   — target phone number
+ * @param {string} targetName     — target display name
+ * @param {number} pointsSpent    — points the attacker wants to spend (must be >= 3)
+ */
+function attackUser(attackerNumber, attackerName, targetNumber, targetName, pointsSpent) {
+  const stats = getStats();
+
+  // Validate attacker has enough points
+  const attacker = stats[attackerNumber];
+  if (!attacker || (attacker.totalPoints || 0) < pointsSpent) {
+    return null;
+  }
+
+  // Calculate damage (floor division)
+  const damage = Math.floor(pointsSpent / 3);
+
+  // Deduct from attacker
+  if (!attacker.bonusPoints) attacker.bonusPoints = 0;
+  attacker.bonusPoints -= pointsSpent;
+  attacker.name = attackerName;
+  attacker.totalPoints =
+    (attacker.tasksApproved     * 7) +
+    (attacker.tasksProposed     * 3) +
+    (attacker.notesApproved     * 5) +
+    (attacker.notesProposed     * 2) +
+    (attacker.resourcesApproved * 2) +
+    (attacker.resourcesProposed * 1) +
+    (attacker.questionPoints    || 0) +
+    (attacker.questionsAsked    * 1) +
+    (attacker.remindersApproved * 1) +
+    (attacker.bonusPoints       || 0);
+
+  // Apply damage to target with checkpoint logic
+  if (!stats[targetNumber]) {
+    stats[targetNumber] = {
+      name: targetName,
+      tasksProposed: 0, tasksApproved: 0,
+      notesProposed: 0, notesApproved: 0,
+      resourcesProposed: 0, resourcesApproved: 0,
+      questionsAnswered: 0, questionsAsked: 0,
+      questionPoints: 0, remindersApproved: 0,
+      bonusPoints: 0, totalPoints: 0,
+    };
+  }
+  stats[targetNumber].name = targetName;
+  if (!stats[targetNumber].bonusPoints) stats[targetNumber].bonusPoints = 0;
+
+  // Calculate new bonus points with checkpoint protection
+  const targetCurrentPoints = 
+    (stats[targetNumber].tasksApproved     * 7) +
+    (stats[targetNumber].tasksProposed     * 3) +
+    (stats[targetNumber].notesApproved     * 5) +
+    (stats[targetNumber].notesProposed     * 2) +
+    (stats[targetNumber].resourcesApproved * 2) +
+    (stats[targetNumber].resourcesProposed * 1) +
+    (stats[targetNumber].questionPoints    || 0) +
+    (stats[targetNumber].questionsAsked    * 1) +
+    (stats[targetNumber].remindersApproved * 1) +
+    (stats[targetNumber].bonusPoints       || 0);
+
+  let newBonusPoints = stats[targetNumber].bonusPoints - damage;
+
+  // Apply checkpoint: if target has >= 50 total points, can't go below 50
+  if (targetCurrentPoints >= 50) {
+    const minBonusAllowed = 50 - (
+      (stats[targetNumber].tasksApproved     * 7) +
+      (stats[targetNumber].tasksProposed     * 3) +
+      (stats[targetNumber].notesApproved     * 5) +
+      (stats[targetNumber].notesProposed     * 2) +
+      (stats[targetNumber].resourcesApproved * 2) +
+      (stats[targetNumber].resourcesProposed * 1) +
+      (stats[targetNumber].questionPoints    || 0) +
+      (stats[targetNumber].questionsAsked    * 1) +
+      (stats[targetNumber].remindersApproved * 1)
+    );
+    newBonusPoints = Math.max(newBonusPoints, minBonusAllowed);
+  }
+  // If target has < 50 points, they can go negative (no lower limit)
+
+  stats[targetNumber].bonusPoints = newBonusPoints;
+  const t = stats[targetNumber];
+  t.totalPoints =
+    (t.tasksApproved     * 7) +
+    (t.tasksProposed     * 3) +
+    (t.notesApproved     * 5) +
+    (t.notesProposed     * 2) +
+    (t.resourcesApproved * 2) +
+    (t.resourcesProposed * 1) +
+    (t.questionPoints    || 0) +
+    (t.questionsAsked    * 1) +
+    (t.remindersApproved * 1) +
+    (t.bonusPoints       || 0);
+
+  write('stats', stats);
+  return {
+    attacker: stats[attackerNumber],
+    target: stats[targetNumber],
+    damage,
+    actualDamage: targetCurrentPoints >= 50 ? Math.max(0, targetCurrentPoints - t.totalPoints) : damage
+  };
+}
+
+/**
  * Adds bonus points manually to a user (e.g. for unscheduled dynamics).
  * @param {string} number  — phone number
  * @param {string} name    — display name
@@ -590,7 +756,72 @@ function log(type, data) {
   write('logs', list);
 }
 
+// ─── Schedule Overrides ───────────────────────────────────────────────────────
+
+function getScheduleOverrides() {
+  return read('scheduleOverrides');
+}
+
+function getOverrideForDate(date) {
+  const overrides = getScheduleOverrides();
+  return overrides[date] || null;
+}
+
+function saveScheduleOverride(date, classes) {
+  const overrides = getScheduleOverrides();
+  overrides[date] = classes;
+  write('scheduleOverrides', overrides);
+}
+
+function deleteScheduleOverride(date) {
+  const overrides = getScheduleOverrides();
+  delete overrides[date];
+  write('scheduleOverrides', overrides);
+}
+
+// ─── Dado (dice rolls) ─────────────────────────────────────────────────────────
+
+const getDado = () => read('dado');
+
+function saveDadoRoll(userId, number) {
+  const dado = getDado();
+  if (!dado[userId]) {
+    dado[userId] = [];
+  }
+  dado[userId].push({
+    number: number,
+    timestamp: new Date().toISOString(),
+  });
+  write('dado', dado);
+}
+
+function checkDadoCooldown(userId, cooldownSeconds = 30) {
+  const dado = getDado();
+  if (!dado[userId] || dado[userId].length === 0) return true;
+  
+  const lastRoll = dado[userId][dado[userId].length - 1];
+  const lastTime = new Date(lastRoll.timestamp).getTime();
+  const now = Date.now();
+  const elapsedSeconds = Math.floor((now - lastTime) / 1000);
+  
+  return elapsedSeconds >= cooldownSeconds;
+}
+
+function getDadoCooldownRemaining(userId, cooldownSeconds = 30) {
+  const dado = getDado();
+  if (!dado[userId] || dado[userId].length === 0) return 0;
+  
+  const lastRoll = dado[userId][dado[userId].length - 1];
+  const lastTime = new Date(lastRoll.timestamp).getTime();
+  const now = Date.now();
+  const elapsedSeconds = Math.floor((now - lastTime) / 1000);
+  
+  return Math.max(0, cooldownSeconds - elapsedSeconds);
+}
+
 module.exports = {
+  // cache management
+  initializeCache, flush,
   // reminders
   getReminders, saveReminder, deleteReminder, getActiveReminders,
   // pending reminders
@@ -610,7 +841,7 @@ module.exports = {
   // faq
   getFaqs, getActiveFaqs, saveFaq, saveFaqForReminder, deleteFaq, deleteFaqsByReminderId, matchFaq,
   // stats
-  getStats, incrementStat, getLeaderboard, addBonusPoints, transferPoints,
+  getStats, incrementStat, getLeaderboard, addBonusPoints, transferPoints, attackUser,
   // mute
   getMuted, muteUser, unmuteUser, isMuted, cleanExpiredMutes,
   // questions
@@ -623,4 +854,8 @@ module.exports = {
   getPrize, setPrize,
   // logs
   log,
+  // schedule overrides
+  getScheduleOverrides, getOverrideForDate, saveScheduleOverride, deleteScheduleOverride,
+  // dado
+  getDado, saveDadoRoll, checkDadoCooldown, getDadoCooldownRemaining,
 };
