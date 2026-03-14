@@ -1,247 +1,224 @@
-// handlers/storage.js — capa de persistencia unificada en JSON con cache asincrónico
+// handlers/storage.js — SQLite-based persistent storage for StudyBot
+// Maintains backward compatible API with old JSON-based system
 
-const fs   = require('fs');
-const path = require('path');
+const { getDb } = require('./db');
 
-const FILES = {
-  reminders:        path.join(__dirname, '../data/reminders.json'),
-  pendingReminders: path.join(__dirname, '../data/pending-reminders.json'),
-  homework:         path.join(__dirname, '../data/homework.json'),
-  pending:          path.join(__dirname, '../data/pending.json'),
-  notes:            path.join(__dirname, '../data/notes.json'),
-  pendingNotes:     path.join(__dirname, '../data/pending-notes.json'),
-  resources:        path.join(__dirname, '../data/resources.json'),
-  pendingResources: path.join(__dirname, '../data/pending-resources.json'),
-  faqs:             path.join(__dirname, '../data/faqs.json'),
-  stats:            path.join(__dirname, '../data/stats.json'),
-  muted:            path.join(__dirname, '../data/muted.json'),
-  questions:        path.join(__dirname, '../data/questions.json'),
-  dailyQuestions:   path.join(__dirname, '../data/daily-questions.json'),
-  logs:             path.join(__dirname, '../data/logs.json'),
-  activity:         path.join(__dirname, '../data/activity.json'),
-  prize:            path.join(__dirname, '../data/prize.json'),
-  scheduleOverrides: path.join(__dirname, '../data/schedule-overrides.json'),
-  dado:             path.join(__dirname, '../data/dado.json'),
-};
-
-// ─── In-Memory Cache System ────────────────────────────────────────────────────
-
-const cache = {};
-const isDirty = {};
-let flushTimer = null;
-
-const DEFAULT_VALUES = {
-  stats: {}, activity: {}, prize: {}, scheduleOverrides: {}, dado: {}
-};
-
-// Initialize cache with empty values
-Object.keys(FILES).forEach(key => {
-  cache[key] = DEFAULT_VALUES[key] || [];
-  isDirty[key] = false;
-});
-
-// Periodic flush: batch writes to disk every 30 seconds
-function startFlusher() {
-  if (flushTimer) clearInterval(flushTimer);
-  flushTimer = setInterval(() => {
-    const dirtyKeys = Object.keys(isDirty).filter(k => isDirty[k]);
-    dirtyKeys.forEach(key => {
-      try {
-        fs.writeFileSync(FILES[key], JSON.stringify(cache[key]));
-        isDirty[key] = false;
-      } catch (err) {
-        console.error(`[STORAGE] Error flushing ${key}:`, err.message);
-      }
-    });
-  }, 30000);
-  flushTimer.unref(); // Don't keep process alive
-}
-
-// Initialize caches from disk on startup
-async function initializeCache() {
-  for (const [key, file] of Object.entries(FILES)) {
-    try {
-      if (fs.existsSync(file)) {
-        cache[key] = JSON.parse(fs.readFileSync(file, 'utf-8'));
-      }
-    } catch (err) {
-      console.warn(`[STORAGE] Error loading ${key}, using defaults`);
-      cache[key] = DEFAULT_VALUES[key] || [];
-    }
-  }
-  startFlusher();
-}
-
-// Explicit flush on shutdown
-function flush() {
-  if (flushTimer) clearInterval(flushTimer);
-  Object.keys(isDirty).forEach(key => {
-    if (isDirty[key]) {
-      try {
-        fs.writeFileSync(FILES[key], JSON.stringify(cache[key]));
-        isDirty[key] = false;
-      } catch (err) {
-        console.error(`[STORAGE] Error flushing ${key} on shutdown:`, err.message);
-      }
-    }
-  });
-}
-
-// Core read/write functions using cache
-function read(key) {
-  return cache[key] ?? (DEFAULT_VALUES[key] || []);
-}
-
-function write(key, data) {
-  cache[key] = data;
-  isDirty[key] = true;
-}
+// ─── Utility ───────────────────────────────────────────────────────────────────
 
 function genId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 }
 
-// ─── Reminders ────────────────────────────────────────────────────────────────
-
-const getReminders     = ()       => read('reminders');
-function deleteReminder(id) {
-  const list = getReminders();
-  const filtered = list.filter(r => r.id !== id);
-  write('reminders', filtered);
-  return filtered.length < list.length;
+// Stub functions for backward compatibility (no-op in SQLite mode)
+function initializeCache() {
+  return Promise.resolve();
 }
-const getActiveReminders = ()     => {
-  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
-  return getReminders().filter(r => r.date >= todayStr);
+function flush() {
+  // SQLite handles persistence automatically
+}
+
+// ─── Reminders ─────────────────────────────────────────────────────────────────
+
+const getReminders = () => {
+  const db = getDb();
+  return db.prepare('SELECT * FROM reminders ORDER BY date ASC').all();
 };
+
+function deleteReminder(id) {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM reminders WHERE id = ?').run(id);
+  if (result.changes > 0) {
+    deleteFaqsByReminderId(id);
+  }
+  return result.changes > 0;
+}
+
+const getActiveReminders = () => {
+  const db = getDb();
+  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+  return db.prepare('SELECT * FROM reminders WHERE date >= ? ORDER BY date ASC').all(todayStr);
+};
+
 function saveReminder(data) {
-  const list = getReminders();
-  const entry = { id: genId(), ...data, createdAt: new Date().toISOString() };
-  list.push(entry);
-  write('reminders', list);
-  return entry;
+  const db = getDb();
+  const id = genId();
+  const createdAt = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO reminders (id, title, date, description, addedBy, approvedBy, createdAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(id, data.title, data.date, data.description || null, data.addedBy || null, data.approvedBy || null, createdAt);
+  return { id, ...data, createdAt };
 }
 
-// ─── Pending reminders (sugerencias esperando aprobación) ─────────────────────
+// ─── Pending Reminders ─────────────────────────────────────────────────────────
 
-const getPendingReminders    = ()    => read('pendingReminders');
+const getPendingReminders = () => {
+  const db = getDb();
+  return db.prepare('SELECT * FROM pending_reminders ORDER BY suggestedAt DESC').all();
+};
+
 function deletePendingReminder(id) {
-  const list = getPendingReminders();
-  const filtered = list.filter(p => p.id !== id);
-  write('pendingReminders', filtered);
-  return filtered.length < list.length;
+  const db = getDb();
+  const result = db.prepare('DELETE FROM pending_reminders WHERE id = ?').run(id);
+  return result.changes > 0;
 }
+
 function savePendingReminder(data) {
-  const list = getPendingReminders();
-  const entry = { id: genId(), ...data, suggestedAt: new Date().toISOString() };
-  list.push(entry);
-  write('pendingReminders', list);
-  return entry;
+  const db = getDb();
+  const id = genId();
+  const suggestedAt = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO pending_reminders (id, title, date, description, proposedBy, suggestedAt)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, data.title, data.date, data.description || null, data.proposedBy || null, suggestedAt);
+  return { id, ...data, suggestedAt };
 }
 
+// ─── Tasks/Homework ───────────────────────────────────────────────────────────
 
+const getHomework = () => {
+  const db = getDb();
+  return db.prepare('SELECT * FROM tasks ORDER BY date ASC').all();
+};
 
-const getHomework    = ()       => read('homework');
 function deleteHomework(id) {
-  const list = getHomework();
-  const filtered = list.filter(h => h.id !== id);
-  write('homework', filtered);
-  return filtered.length < list.length;
+  const db = getDb();
+  const result = db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
+  return result.changes > 0;
 }
+
 function saveHomework(data) {
-  const list = getHomework();
-  const entry = { id: genId(), ...data, savedAt: new Date().toISOString() };
-  list.push(entry);
-  write('homework', list);
-  return entry;
+  const db = getDb();
+  const id = genId();
+  const createdAt = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO tasks (id, title, date, description, addedBy, approvedBy, createdAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(id, data.title, data.date, data.description || null, data.addedBy || null, data.approvedBy || null, createdAt);
+  return { id, ...data, createdAt };
 }
 
-// ─── Pending (propuestas esperando aprobación) ────────────────────────────────
+// ─── Pending Tasks ────────────────────────────────────────────────────────────
 
-const getPending    = ()    => read('pending');
+const getPending = () => {
+  const db = getDb();
+  return db.prepare('SELECT * FROM pending_tasks ORDER BY proposedAt DESC').all();
+};
+
 function deletePending(id) {
-  const list = getPending();
-  const filtered = list.filter(p => p.id !== id);
-  write('pending', filtered);
-  return filtered.length < list.length;
+  const db = getDb();
+  const result = db.prepare('DELETE FROM pending_tasks WHERE id = ?').run(id);
+  return result.changes > 0;
 }
+
 function savePending(data) {
-  const list = getPending();
-  const entry = { id: genId(), ...data, proposedAt: new Date().toISOString(), status: 'pending' };
-  list.push(entry);
-  write('pending', list);
-  return entry;
+  const db = getDb();
+  const id = genId();
+  const proposedAt = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO pending_tasks (id, title, description, subject, proposedBy, proposedAt, status, link)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, data.title, data.description || null, data.subject || null, data.proposedBy || null, proposedAt, 'pending', data.link || null);
+  return { id, ...data, proposedAt, status: 'pending' };
 }
 
-// ─── Resources (recursos aprobados) ──────────────────────────────────────────
+// ─── Resources ────────────────────────────────────────────────────────────────
 
-const getResources    = ()       => read('resources');
+const getResources = () => {
+  const db = getDb();
+  return db.prepare('SELECT * FROM resources ORDER BY savedAt DESC').all();
+};
+
 function deleteResource(id) {
-  const list = getResources();
-  const filtered = list.filter(r => r.id !== id);
-  write('resources', filtered);
-  return filtered.length < list.length;
+  const db = getDb();
+  const result = db.prepare('DELETE FROM resources WHERE id = ?').run(id);
+  return result.changes > 0;
 }
+
 function saveResource(data) {
-  const list = getResources();
-  const entry = { id: genId(), ...data, savedAt: new Date().toISOString() };
-  list.push(entry);
-  write('resources', list);
-  return entry;
+  const db = getDb();
+  const id = genId();
+  const savedAt = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO resources (id, type, title, description, link, proposedBy, approvedBy, savedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, data.type || null, data.title, data.description || null, data.link || null, data.proposedBy || null, data.approvedBy || null, savedAt);
+  return { id, ...data, savedAt };
 }
 
-// ─── Pending resources (recursos propuestos esperando aprobación) ─────────────
+// ─── Pending Resources ────────────────────────────────────────────────────────
 
-const getPendingResources    = ()    => read('pendingResources');
+const getPendingResources = () => {
+  const db = getDb();
+  return db.prepare('SELECT * FROM pending_resources ORDER BY suggestedAt DESC').all();
+};
+
 function deletePendingResource(id) {
-  const list = getPendingResources();
-  const filtered = list.filter(p => p.id !== id);
-  write('pendingResources', filtered);
-  return filtered.length < list.length;
+  const db = getDb();
+  const result = db.prepare('DELETE FROM pending_resources WHERE id = ?').run(id);
+  return result.changes > 0;
 }
+
 function savePendingResource(data) {
-  const list = getPendingResources();
-  const entry = { id: genId(), ...data, proposedAt: new Date().toISOString(), status: 'pending' };
-  list.push(entry);
-  write('pendingResources', list);
-  return entry;
+  const db = getDb();
+  const id = genId();
+  const suggestedAt = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO pending_resources (id, type, title, description, link, proposedBy, suggestedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(id, data.type || null, data.title, data.description || null, data.link || null, data.proposedBy || null, suggestedAt);
+  return { id, ...data, suggestedAt };
 }
 
-// ─── Notes (apuntes aprobados) ────────────────────────────────────────────────
+// ─── Notes ────────────────────────────────────────────────────────────────────
 
-const getNotes    = ()       => read('notes');
+const getNotes = () => {
+  const db = getDb();
+  return db.prepare('SELECT * FROM notes ORDER BY savedAt DESC').all();
+};
+
 function deleteNote(id) {
-  const list = getNotes();
-  const filtered = list.filter(n => n.id !== id);
-  write('notes', filtered);
-  return filtered.length < list.length;
+  const db = getDb();
+  const result = db.prepare('DELETE FROM notes WHERE id = ?').run(id);
+  return result.changes > 0;
 }
+
 function saveNote(data) {
-  const list = getNotes();
-  const entry = { id: genId(), ...data, savedAt: new Date().toISOString() };
-  list.push(entry);
-  write('notes', list);
-  return entry;
+  const db = getDb();
+  const id = genId();
+  const savedAt = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO notes (id, subject, title, description, link, proposedBy, approvedBy, savedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, data.subject, data.title, data.description || null, data.link || null, data.proposedBy || null, data.approvedBy || null, savedAt);
+  return { id, ...data, savedAt };
 }
 
-// ─── Pending notes (apuntes propuestos esperando aprobación) ──────────────────
+// ─── Pending Notes ────────────────────────────────────────────────────────────
 
-const getPendingNotes    = ()    => read('pendingNotes');
+const getPendingNotes = () => {
+  const db = getDb();
+  return db.prepare('SELECT * FROM pending_notes ORDER BY suggestedAt DESC').all();
+};
+
 function deletePendingNote(id) {
-  const list = getPendingNotes();
-  const filtered = list.filter(p => p.id !== id);
-  write('pendingNotes', filtered);
-  return filtered.length < list.length;
-}
-function savePendingNote(data) {
-  const list = getPendingNotes();
-  const entry = { id: genId(), ...data, proposedAt: new Date().toISOString(), status: 'pending' };
-  list.push(entry);
-  write('pendingNotes', list);
-  return entry;
+  const db = getDb();
+  const result = db.prepare('DELETE FROM pending_notes WHERE id = ?').run(id);
+  return result.changes > 0;
 }
 
-// ─── FAQs ─────────────────────────────────────────────────────────────────────
+function savePendingNote(data) {
+  const db = getDb();
+  const id = genId();
+  const suggestedAt = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO pending_notes (id, subject, title, description, link, proposedBy, suggestedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(id, data.subject, data.title, data.description || null, data.link || null, data.proposedBy || null, suggestedAt);
+  return { id, ...data, suggestedAt };
+}
+
+// ─── FAQs ──────────────────────────────────────────────────────────────────────
 
 const STOP_WORDS = new Set([
   'el','la','los','las','un','una','unos','unas','de','del','en','a','al',
@@ -259,35 +236,42 @@ function extractKeywords(title, description) {
   return [...new Set(words)].slice(0, 8);
 }
 
-const getFaqs    = ()    => read('faqs');
+const getFaqs = () => {
+  const db = getDb();
+  return db.prepare('SELECT * FROM faqs ORDER BY addedAt DESC').all();
+};
+
 function deleteFaq(id) {
-  const list = getFaqs();
-  const filtered = list.filter(f => f.id !== id);
-  write('faqs', filtered);
-  return filtered.length < list.length;
+  const db = getDb();
+  const result = db.prepare('DELETE FROM faqs WHERE id = ?').run(id);
+  return result.changes > 0;
 }
 
-/** Returns only FAQs that are currently relevant:
- *  - Admin-added FAQs (no reminderId) are always included.
- *  - Reminder-generated FAQs are included only while expiresAt >= today. */
 function getActiveFaqs() {
+  const db = getDb();
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
-  return getFaqs().filter(f => {
-    if (f.reminderId) return f.expiresAt >= todayStr;
-    return true;
-  });
+  return db.prepare(`
+    SELECT * FROM faqs 
+    WHERE reminderId IS NULL 
+       OR (SELECT date FROM reminders WHERE id = reminderId) >= ?
+    ORDER BY addedAt DESC
+  `).all(todayStr);
 }
 
 function saveFaq(data) {
-  const list = getFaqs();
-  const entry = { id: genId(), ...data, createdAt: new Date().toISOString() };
-  list.push(entry);
-  write('faqs', list);
-  return entry;
+  const db = getDb();
+  const id = genId();
+  const keywords = extractKeywords(data.keywords, '').join(' ');
+  const addedAt = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO faqs (id, keywords, question, answer, addedAt, reminderId)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, keywords, data.question || null, data.answer || null, addedAt, data.reminderId || null);
+  return { id, ...data, addedAt };
 }
 
-/** Auto-generates and saves a FAQ entry linked to a reminder. */
 function saveFaqForReminder(reminder) {
+  const db = getDb();
   let keywords = extractKeywords(reminder.title, reminder.description);
   if (keywords.length < 2) {
     const fallback = reminder.title.toLowerCase()
@@ -303,51 +287,54 @@ function saveFaqForReminder(reminder) {
   const question = `¿Cuándo es la entrega de "${reminder.title}"?`;
   const answer = `La fecha límite es el *${formattedDate}*.${reminder.description ? `\n\n📝 ${reminder.description}` : ''}`;
 
-  const list = getFaqs();
-  const entry = {
-    id: genId(),
-    keywords,
-    question,
-    answer,
-    reminderId: reminder.id,
-    expiresAt: reminder.date,
-    addedBy: 'system',
-    createdAt: new Date().toISOString(),
-  };
-  list.push(entry);
-  write('faqs', list);
-  return entry;
+  const id = genId();
+  const addedAt = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO faqs (id, keywords, question, answer, addedAt, reminderId)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, keywords.join(' '), question, answer, addedAt, reminder.id);
+  return { id, keywords, question, answer, reminderId: reminder.id, addedAt };
 }
 
-/** Removes all FAQ entries associated with a reminder. */
-const deleteFaqsByReminderId = (reminderId) =>
-  write('faqs', getFaqs().filter(f => f.reminderId !== reminderId));
+const deleteFaqsByReminderId = (reminderId) => {
+  const db = getDb();
+  db.prepare('DELETE FROM faqs WHERE reminderId = ?').run(reminderId);
+};
 
 function matchFaq(text) {
   if (!text.includes('?')) return null;
+  const db = getDb();
+  const faqs = getActiveFaqs();
   const lower = text.toLowerCase();
-  return getActiveFaqs().find(f => {
-    const matched = (f.keywords || []).filter(k => lower.includes(k.toLowerCase()));
+  
+  return faqs.find(f => {
+    const keywords = (f.keywords || '').split(' ').filter(k => k.length > 0);
+    const matched = keywords.filter(k => lower.includes(k.toLowerCase()));
     return matched.length >= 2;
   });
 }
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
-function getStats() { return read('stats'); }
+function getStats() {
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM stats').all();
+  const stats = {};
+  for (const row of rows) {
+    stats[row.userId] = row;
+  }
+  return stats;
+}
 
-/**
- * Incrementa una métrica para un usuario.
- * @param {string} number  — número de teléfono
- * @param {string} name    — nombre para mostrar
- * @param {string} metric  — 'tasksProposed' | 'tasksApproved' | 'questionsAnswered' | 'questionsAsked'
- * @param {number} amount
- */
 function incrementStat(number, name, metric, amount = 1) {
-  const stats = getStats();
-  if (!stats[number]) {
-    stats[number] = {
-      name,
+  const db = getDb();
+  let stat = db.prepare('SELECT * FROM stats WHERE userId = ?').get(number);
+  
+  if (!stat) {
+    stat = {
+      userId: number,
+      userName: name,
+      points: 0,
       tasksProposed: 0,
       tasksApproved: 0,
       notesProposed: 0,
@@ -359,440 +346,413 @@ function incrementStat(number, name, metric, amount = 1) {
       questionPoints: 0,
       remindersApproved: 0,
       bonusPoints: 0,
-      totalPoints: 0,
+      createdAt: new Date().toISOString(),
     };
+    db.prepare(`
+      INSERT INTO stats (userId, userName, points, tasksProposed, tasksApproved, notesProposed, 
+                         notesApproved, resourcesProposed, resourcesApproved, questionsAnswered,
+                         questionsAsked, questionPoints, remindersApproved, bonusPoints, createdAt, updatedAt)
+      VALUES (?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ?, ?)
+    `).run(number, name, stat.createdAt, new Date().toISOString());
   }
-  stats[number].name = name; // actualiza nombre si cambió
-  if (!stats[number].remindersApproved) stats[number].remindersApproved = 0;
-  if (!stats[number].notesProposed)     stats[number].notesProposed     = 0;
-  if (!stats[number].notesApproved)     stats[number].notesApproved     = 0;
-  if (!stats[number].resourcesProposed) stats[number].resourcesProposed = 0;
-  if (!stats[number].resourcesApproved) stats[number].resourcesApproved = 0;
-  if (!stats[number].questionPoints)    stats[number].questionPoints    = 0;
-  if (!stats[number].bonusPoints)       stats[number].bonusPoints       = 0;
-  stats[number][metric] = (stats[number][metric] || 0) + amount;
 
-  // Recalcular puntos totales.
-  // Los puntos por preguntas son variables (2 fácil / 3 normal / 4 difícil)
-  // y se acumulan en questionPoints en lugar de calcularse desde el conteo.
-  const s = stats[number];
-  s.totalPoints =
-    (s.tasksApproved     * 7) +
-    (s.tasksProposed     * 3) +
-    (s.notesApproved     * 5) +
-    (s.notesProposed     * 2) +
+  stat.userName = name;
+  stat[metric] = (stat[metric] || 0) + amount;
+  
+  const s = stat;
+  const totalPoints =
+    (s.tasksApproved * 7) +
+    (s.tasksProposed * 3) +
+    (s.notesApproved * 5) +
+    (s.notesProposed * 2) +
     (s.resourcesApproved * 2) +
     (s.resourcesProposed * 1) +
-    (s.questionPoints    || 0) +
-    (s.questionsAsked    * 1) +
+    (s.questionPoints || 0) +
+    (s.questionsAsked * 1) +
     (s.remindersApproved * 1) +
-    (s.bonusPoints       || 0);
+    (s.bonusPoints || 0);
 
-  write('stats', stats);
-  return stats[number];
+  db.prepare(`
+    UPDATE stats SET userName = ?, tasksProposed = ?, tasksApproved = ?, notesProposed = ?,
+                     notesApproved = ?, resourcesProposed = ?, resourcesApproved = ?,
+                     questionsAnswered = ?, questionsAsked = ?, questionPoints = ?,
+                     remindersApproved = ?, bonusPoints = ?, points = ?, updatedAt = ?
+    WHERE userId = ?
+  `).run(name, s.tasksProposed, s.tasksApproved, s.notesProposed, s.notesApproved,
+         s.resourcesProposed, s.resourcesApproved, s.questionsAnswered, s.questionsAsked,
+         s.questionPoints, s.remindersApproved, s.bonusPoints, totalPoints, new Date().toISOString(), number);
+
+  return { userId: number, userName: name, ...stat, points: totalPoints };
 }
 
 function getLeaderboard(limit = 5) {
-  const stats = getStats();
-  return Object.entries(stats)
-    .map(([number, data]) => ({ number, ...data }))
-    .sort((a, b) => b.totalPoints - a.totalPoints)
-    .slice(0, limit);
+  const db = getDb();
+  return db.prepare('SELECT userId as number, * FROM stats ORDER BY points DESC LIMIT ?').all(limit);
 }
 
-/**
- * Transfers points from one user to another (donation).
- * Deducts from the donor's bonusPoints and adds to the recipient's bonusPoints.
- * Returns null if the donor doesn't have enough totalPoints.
- * @param {string} fromNumber — donor phone number
- * @param {string} fromName   — donor display name
- * @param {string} toNumber   — recipient phone number
- * @param {string} toName     — recipient display name
- * @param {number} amount     — points to transfer (positive integer)
- */
 function transferPoints(fromNumber, fromName, toNumber, toName, amount) {
-  const stats = getStats();
+  const db = getDb();
+  const donor = db.prepare('SELECT * FROM stats WHERE userId = ?').get(fromNumber);
+  
+  if (!donor || (donor.points || 0) < amount) return null;
 
-  const donor = stats[fromNumber];
-  if (!donor || (donor.totalPoints || 0) < amount) return null;
-
-  // Deduct from donor
-  if (!donor.bonusPoints) donor.bonusPoints = 0;
-  donor.bonusPoints -= amount;
-  donor.name = fromName;
-  donor.totalPoints =
-    (donor.tasksApproved     * 7) +
-    (donor.tasksProposed     * 3) +
-    (donor.notesApproved     * 5) +
-    (donor.notesProposed     * 2) +
+  donor.bonusPoints = (donor.bonusPoints || 0) - amount;
+  donor.userName = fromName;
+  const donorTotalPoints =
+    (donor.tasksApproved * 7) +
+    (donor.tasksProposed * 3) +
+    (donor.notesApproved * 5) +
+    (donor.notesProposed * 2) +
     (donor.resourcesApproved * 2) +
     (donor.resourcesProposed * 1) +
-    (donor.questionPoints    || 0) +
-    (donor.questionsAsked    * 1) +
+    (donor.questionPoints || 0) +
+    (donor.questionsAsked * 1) +
     (donor.remindersApproved * 1) +
-    (donor.bonusPoints       || 0);
+    (donor.bonusPoints);
 
-  // Add to recipient
-  if (!stats[toNumber]) {
-    stats[toNumber] = {
-      name: toName,
-      tasksProposed: 0, tasksApproved: 0,
-      notesProposed: 0, notesApproved: 0,
-      resourcesProposed: 0, resourcesApproved: 0,
-      questionsAnswered: 0, questionsAsked: 0,
-      questionPoints: 0, remindersApproved: 0,
-      bonusPoints: 0, totalPoints: 0,
-    };
+  db.prepare(`
+    UPDATE stats SET userName = ?, bonusPoints = ?, points = ?, updatedAt = ? WHERE userId = ?
+  `).run(fromName, donor.bonusPoints, donorTotalPoints, new Date().toISOString(), fromNumber);
+
+  let recipient = db.prepare('SELECT * FROM stats WHERE userId = ?').get(toNumber);
+  if (!recipient) {
+    db.prepare(`
+      INSERT INTO stats (userId, userName, bonusPoints, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(toNumber, toName, amount, new Date().toISOString(), new Date().toISOString());
+    recipient = { userId: toNumber, userName: toName, bonusPoints: amount, points: amount };
+  } else {
+    recipient.bonusPoints = (recipient.bonusPoints || 0) + amount;
+    recipient.userName = toName;
+    const recipientTotalPoints =
+      (recipient.tasksApproved * 7) +
+      (recipient.tasksProposed * 3) +
+      (recipient.notesApproved * 5) +
+      (recipient.notesProposed * 2) +
+      (recipient.resourcesApproved * 2) +
+      (recipient.resourcesProposed * 1) +
+      (recipient.questionPoints || 0) +
+      (recipient.questionsAsked * 1) +
+      (recipient.remindersApproved * 1) +
+      (recipient.bonusPoints);
+
+    db.prepare(`
+      UPDATE stats SET userName = ?, bonusPoints = ?, points = ?, updatedAt = ? WHERE userId = ?
+    `).run(toName, recipient.bonusPoints, recipientTotalPoints, new Date().toISOString(), toNumber);
+    recipient.points = recipientTotalPoints;
   }
-  stats[toNumber].name = toName;
-  if (!stats[toNumber].bonusPoints) stats[toNumber].bonusPoints = 0;
-  stats[toNumber].bonusPoints += amount;
-  const r = stats[toNumber];
-  r.totalPoints =
-    (r.tasksApproved     * 7) +
-    (r.tasksProposed     * 3) +
-    (r.notesApproved     * 5) +
-    (r.notesProposed     * 2) +
-    (r.resourcesApproved * 2) +
-    (r.resourcesProposed * 1) +
-    (r.questionPoints    || 0) +
-    (r.questionsAsked    * 1) +
-    (r.remindersApproved * 1) +
-    (r.bonusPoints       || 0);
 
-  write('stats', stats);
-  return { donor: stats[fromNumber], recipient: stats[toNumber] };
+  return { donor: { userId: fromNumber, ...donor, points: donorTotalPoints }, recipient };
 }
 
-/**
- * Attack another user: attacker spends X points to subtract floor(X/3) from target.
- * Checkpoints: Users with >= 50 points can't go below 50. Users with < 50 can go negative.
- * Returns an object with attack details or null if attack fails.
- * @param {string} attackerNumber — attacker phone number
- * @param {string} attackerName   — attacker display name
- * @param {string} targetNumber   — target phone number
- * @param {string} targetName     — target display name
- * @param {number} pointsSpent    — points the attacker wants to spend (must be >= 3)
- */
 function attackUser(attackerNumber, attackerName, targetNumber, targetName, pointsSpent) {
-  const stats = getStats();
+  const db = getDb();
+  const attacker = db.prepare('SELECT * FROM stats WHERE userId = ?').get(attackerNumber);
+  
+  if (!attacker || (attacker.points || 0) < pointsSpent) return null;
 
-  // Validate attacker has enough points
-  const attacker = stats[attackerNumber];
-  if (!attacker || (attacker.totalPoints || 0) < pointsSpent) {
-    return null;
-  }
-
-  // Calculate damage (floor division)
   const damage = Math.floor(pointsSpent / 3);
-
-  // Deduct from attacker
-  if (!attacker.bonusPoints) attacker.bonusPoints = 0;
-  attacker.bonusPoints -= pointsSpent;
-  attacker.name = attackerName;
-  attacker.totalPoints =
-    (attacker.tasksApproved     * 7) +
-    (attacker.tasksProposed     * 3) +
-    (attacker.notesApproved     * 5) +
-    (attacker.notesProposed     * 2) +
+  
+  // Attacker spends points from bonusPoints
+  attacker.bonusPoints = (attacker.bonusPoints || 0) - pointsSpent;
+  attacker.userName = attackerName;
+  const attackerTotalPoints =
+    (attacker.tasksApproved * 7) +
+    (attacker.tasksProposed * 3) +
+    (attacker.notesApproved * 5) +
+    (attacker.notesProposed * 2) +
     (attacker.resourcesApproved * 2) +
     (attacker.resourcesProposed * 1) +
-    (attacker.questionPoints    || 0) +
-    (attacker.questionsAsked    * 1) +
+    (attacker.questionPoints || 0) +
+    (attacker.questionsAsked * 1) +
     (attacker.remindersApproved * 1) +
-    (attacker.bonusPoints       || 0);
+    (attacker.bonusPoints);
 
-  // Apply damage to target with checkpoint logic
-  if (!stats[targetNumber]) {
-    stats[targetNumber] = {
-      name: targetName,
-      tasksProposed: 0, tasksApproved: 0,
-      notesProposed: 0, notesApproved: 0,
-      resourcesProposed: 0, resourcesApproved: 0,
-      questionsAnswered: 0, questionsAsked: 0,
-      questionPoints: 0, remindersApproved: 0,
-      bonusPoints: 0, totalPoints: 0,
-    };
+  db.prepare(`
+    UPDATE stats SET userName = ?, bonusPoints = ?, points = ?, updatedAt = ? WHERE userId = ?
+  `).run(attackerName, attacker.bonusPoints, attackerTotalPoints, new Date().toISOString(), attackerNumber);
+
+  let target = db.prepare('SELECT * FROM stats WHERE userId = ?').get(targetNumber);
+
+  if (!target) {
+    // Target doesn't exist yet - create with only bonus damage
+    target = { userId: targetNumber, userName: targetName, bonusPoints: -damage, points: -damage };
+    db.prepare(`
+      INSERT INTO stats (userId, userName, bonusPoints, points, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(targetNumber, targetName, -damage, -damage, new Date().toISOString(), new Date().toISOString());
+  } else {
+    // Only subtract from bonusPoints; earned points are protected
+    target.bonusPoints = (target.bonusPoints || 0) - damage;
+    target.userName = targetName;
+    const targetTotalPoints =
+      (target.tasksApproved * 7) +
+      (target.tasksProposed * 3) +
+      (target.notesApproved * 5) +
+      (target.notesProposed * 2) +
+      (target.resourcesApproved * 2) +
+      (target.resourcesProposed * 1) +
+      (target.questionPoints || 0) +
+      (target.questionsAsked * 1) +
+      (target.remindersApproved * 1) +
+      (target.bonusPoints);
+
+    db.prepare(`
+      UPDATE stats SET userName = ?, bonusPoints = ?, points = ?, updatedAt = ? WHERE userId = ?
+    `).run(targetName, target.bonusPoints, targetTotalPoints, new Date().toISOString(), targetNumber);
+    target.points = targetTotalPoints;
   }
-  stats[targetNumber].name = targetName;
-  if (!stats[targetNumber].bonusPoints) stats[targetNumber].bonusPoints = 0;
 
-  // Calculate new bonus points with checkpoint protection
-  const targetCurrentPoints = 
-    (stats[targetNumber].tasksApproved     * 7) +
-    (stats[targetNumber].tasksProposed     * 3) +
-    (stats[targetNumber].notesApproved     * 5) +
-    (stats[targetNumber].notesProposed     * 2) +
-    (stats[targetNumber].resourcesApproved * 2) +
-    (stats[targetNumber].resourcesProposed * 1) +
-    (stats[targetNumber].questionPoints    || 0) +
-    (stats[targetNumber].questionsAsked    * 1) +
-    (stats[targetNumber].remindersApproved * 1) +
-    (stats[targetNumber].bonusPoints       || 0);
-
-  let newBonusPoints = stats[targetNumber].bonusPoints - damage;
-
-  // Apply checkpoint: if target has >= 50 total points, can't go below 50
-  if (targetCurrentPoints >= 50) {
-    const minBonusAllowed = 50 - (
-      (stats[targetNumber].tasksApproved     * 7) +
-      (stats[targetNumber].tasksProposed     * 3) +
-      (stats[targetNumber].notesApproved     * 5) +
-      (stats[targetNumber].notesProposed     * 2) +
-      (stats[targetNumber].resourcesApproved * 2) +
-      (stats[targetNumber].resourcesProposed * 1) +
-      (stats[targetNumber].questionPoints    || 0) +
-      (stats[targetNumber].questionsAsked    * 1) +
-      (stats[targetNumber].remindersApproved * 1)
-    );
-    newBonusPoints = Math.max(newBonusPoints, minBonusAllowed);
-  }
-  // If target has < 50 points, they can go negative (no lower limit)
-
-  stats[targetNumber].bonusPoints = newBonusPoints;
-  const t = stats[targetNumber];
-  t.totalPoints =
-    (t.tasksApproved     * 7) +
-    (t.tasksProposed     * 3) +
-    (t.notesApproved     * 5) +
-    (t.notesProposed     * 2) +
-    (t.resourcesApproved * 2) +
-    (t.resourcesProposed * 1) +
-    (t.questionPoints    || 0) +
-    (t.questionsAsked    * 1) +
-    (t.remindersApproved * 1) +
-    (t.bonusPoints       || 0);
-
-  write('stats', stats);
   return {
-    attacker: stats[attackerNumber],
-    target: stats[targetNumber],
+    attacker: { userId: attackerNumber, ...attacker, points: attackerTotalPoints },
+    target,
     damage,
-    actualDamage: targetCurrentPoints >= 50 ? Math.max(0, targetCurrentPoints - t.totalPoints) : damage
   };
 }
 
-/**
- * Adds bonus points manually to a user (e.g. for unscheduled dynamics).
- * @param {string} number  — phone number
- * @param {string} name    — display name
- * @param {number} amount  — points to add (positive integer)
- * @param {string} reason  — optional reason for the log
- */
 function addBonusPoints(number, name, amount, reason = '') {
-  const stats = getStats();
-  if (!stats[number]) {
-    stats[number] = {
-      name,
-      tasksProposed: 0, tasksApproved: 0,
-      notesProposed: 0, notesApproved: 0,
-      resourcesProposed: 0, resourcesApproved: 0,
-      questionsAnswered: 0, questionsAsked: 0,
-      questionPoints: 0, remindersApproved: 0,
-      bonusPoints: 0, totalPoints: 0,
-    };
-  }
-  stats[number].name = name;
-  if (!stats[number].bonusPoints) stats[number].bonusPoints = 0;
-  stats[number].bonusPoints += amount;
-
-  const s = stats[number];
-  s.totalPoints =
-    (s.tasksApproved     * 7) +
-    (s.tasksProposed     * 3) +
-    (s.notesApproved     * 5) +
-    (s.notesProposed     * 2) +
-    (s.resourcesApproved * 2) +
-    (s.resourcesProposed * 1) +
-    (s.questionPoints    || 0) +
-    (s.questionsAsked    * 1) +
-    (s.remindersApproved * 1) +
-    (s.bonusPoints       || 0);
-
-  write('stats', stats);
-  return stats[number];
+  return incrementStat(number, name, 'bonusPoints', amount);
 }
 
-// ─── Mute ─────────────────────────────────────────────────────────────────────
+// ─── Muted Users ──────────────────────────────────────────────────────────────
 
-function getMuted() { return read('muted'); }
+function getMuted() {
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM muted_users').all();
+  const muted = {};
+  for (const row of rows) {
+    muted[row.userId] = row;
+  }
+  return muted;
+}
 
 function muteUser(number, name, minutes, reason, mutedBy) {
-  const list = getMuted().filter(m => m.number !== number); // evita duplicados
-  const until = new Date(Date.now() + minutes * 60 * 1000).toISOString();
-  const entry = { number, name, until, reason, mutedBy, mutedAt: new Date().toISOString() };
-  list.push(entry);
-  write('muted', list);
-  return entry;
+  const db = getDb();
+  const mutedAt = new Date().toISOString();
+  const unmutedAt = new Date(Date.now() + minutes * 60000).toISOString();
+  db.prepare(`
+    INSERT OR REPLACE INTO muted_users (userId, mutedAt, unmutedAt, reason)
+    VALUES (?, ?, ?, ?)
+  `).run(number, mutedAt, unmutedAt, reason);
 }
 
 function unmuteUser(number) {
-  const list = getMuted();
-  const filtered = list.filter(m => m.number !== number);
-  write('muted', filtered);
-  return filtered.length < list.length;
+  const db = getDb();
+  db.prepare('DELETE FROM muted_users WHERE userId = ?').run(number);
 }
 
 function isMuted(number) {
-  const now = new Date();
-  const list = getMuted();
-  const entry = list.find(m => m.number === number);
-  if (!entry) return null;
-  if (new Date(entry.until) <= now) {
-    write('muted', list.filter(m => m.number !== number));
-    return null;
-  }
-  return entry;
+  const db = getDb();
+  const muted = db.prepare('SELECT * FROM muted_users WHERE userId = ?').get(number);
+  if (!muted) return false;
+  
+  const now = new Date().getTime();
+  const unmutedTime = new Date(muted.unmutedAt).getTime();
+  return now < unmutedTime;
 }
 
 function cleanExpiredMutes() {
-  const now = new Date();
-  write('muted', getMuted().filter(m => new Date(m.until) > now));
+  const db = getDb();
+  db.prepare('DELETE FROM muted_users WHERE datetime(unmutedAt) <= datetime("now")').run();
 }
 
-// ─── Daily questions (programmed by the bot) ─────────────────────────────────
+// ─── Questions ────────────────────────────────────────────────────────────────
 
-/** Returns the pending daily questions pool (array of { question, answer } objects). */
-function getDailyQuestions() { return read('dailyQuestions'); }
-
-/** Persists the updated daily questions pool. */
-function saveDailyQuestions(list) { write('dailyQuestions', list); }
-
-// ─── Anonymous questions ──────────────────────────────────────────────────────
-
-function getQuestions() { return read('questions'); }
+function getQuestions() {
+  const db = getDb();
+  return db.prepare('SELECT * FROM questions').all();
+}
 
 function saveQuestion(data) {
-  const list = getQuestions();
-  const entry = {
-    id: genId(),
-    ...data,
-    askedAt: new Date().toISOString(),
-    groupMsgId: null,       // se rellena después de publicar en el grupo
-    acceptedAnswer: null,   // { by, byName, text, at }
-    extraAnswers: [],       // respuestas válidas adicionales (sin puntos)
-  };
-  list.push(entry);
-  write('questions', list);
-  return entry;
+  const db = getDb();
+  const id = genId();
+  const addedAt = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO questions (id, question, answer, difficulty, addedAt)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(id, data.question, data.answer, data.difficulty, addedAt);
+  return { id, ...data, addedAt };
 }
 
-/** Actualiza campos específicos de una pregunta por id */
 function updateQuestion(id, fields) {
-  const list = getQuestions().map(q => q.id === id ? { ...q, ...fields } : q);
-  write('questions', list);
+  const db = getDb();
+  const updates = Object.entries(fields).map(([key]) => `${key} = ?`).join(', ');
+  const values = Object.values(fields);
+  db.prepare(`UPDATE questions SET ${updates} WHERE id = ?`).run(...values, id);
 }
 
 function markAnswered(id) {
-  updateQuestion(id, { answered: true });
+  const db = getDb();
+  db.prepare('UPDATE daily_questions SET askedAt = ? WHERE question_id = ?').run(new Date().toISOString(), id);
 }
 
-// ─── Activity tracking ────────────────────────────────────────────────────────
+// ─── Daily Questions ──────────────────────────────────────────────────────────
 
-function getActivity() { return read('activity'); }
-
-function getNextActivityId() {
-  const data = getActivity();
-  const ids = Object.values(data).map(u => u.id || 0);
-  return ids.length ? Math.max(...ids) + 1 : 1;
+function getDailyQuestions() {
+  const db = getDb();
+  return db.prepare('SELECT * FROM daily_questions').all();
 }
 
-/** Records the last time a user sent a message in the group. Clears any pending warning.
- *  Assigns a new sequential id to first-time users. */
-function updateLastSeen(number, name) {
-  const data = getActivity();
-  const existing = data[number];
-  data[number] = {
-    id: (existing && existing.id) ? existing.id : getNextActivityId(),
-    name,
-    lastSeen: new Date().toISOString(),
-    warnedAt: null,
-  };
-  write('activity', data);
-}
-
-/** Marks the moment a warning was sent to the user. */
-function setWarnedAt(number) {
-  const data = getActivity();
-  if (data[number]) {
-    data[number].warnedAt = new Date().toISOString();
-    write('activity', data);
+function saveDailyQuestions(list) {
+  const db = getDb();
+  db.prepare('DELETE FROM daily_questions').run();
+  const stmt = db.prepare(`
+    INSERT INTO daily_questions (id, date, question_id, askedAt)
+    VALUES (?, ?, ?, ?)
+  `);
+  for (const item of list) {
+    stmt.run(item.id || genId(), item.date, item.question_id || null, item.askedAt || null);
   }
 }
 
-/** Looks up a user by their short numeric id in activity.json.
- *  Returns { number, id, name, lastSeen, warnedAt } or null. */
+// ─── Activity ──────────────────────────────────────────────────────────────────
+
+function getActivity() {
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM users').all();
+  const activity = {};
+  for (const row of rows) {
+    activity[row.phone] = {
+      id: row.id,
+      name: row.name,
+      lastSeen: row.lastSeen,
+      warnedAt: row.warnedAt,
+    };
+  }
+  return activity;
+}
+
+function getNextActivityId() {
+  const db = getDb();
+  const result = db.prepare('SELECT MAX(id) as maxId FROM users').get();
+  return (result?.maxId || 0) + 1;
+}
+
+function updateLastSeen(number, name) {
+  const db = getDb();
+  const lastSeen = new Date().toISOString();
+  const id = getNextActivityId();
+  db.prepare(`
+    INSERT OR REPLACE INTO users (phone, id, name, lastSeen)
+    VALUES (?, ?, ?, ?)
+  `).run(number, id, name, lastSeen);
+  
+  db.prepare(`
+    INSERT OR REPLACE INTO activity_log (userId, lastSeen)
+    VALUES (?, ?)
+  `).run(String(id), lastSeen);
+}
+
+function setWarnedAt(number) {
+  const db = getDb();
+  const warnedAt = new Date().toISOString();
+  db.prepare(`
+    UPDATE users SET warnedAt = ? WHERE phone = ?
+  `).run(warnedAt, number);
+  
+  const user = db.prepare('SELECT id FROM users WHERE phone = ?').get(number);
+  if (user) {
+    db.prepare(`
+      UPDATE activity_log SET warnedAt = ? WHERE userId = ?
+    `).run(warnedAt, String(user.id));
+  }
+}
+
 function getUserByActivityId(id) {
-  const data = getActivity();
-  const entry = Object.entries(data).find(([, u]) => u.id === id);
-  if (!entry) return null;
-  return { number: entry[0], ...entry[1] };
+  const db = getDb();
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 }
 
 // ─── Prize ────────────────────────────────────────────────────────────────────
 
-/** Returns the current prize config, or null if not set. */
 function getPrize() {
-  const data = read('prize');
-  return data && data.prize ? data : null;
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM prize WHERE id = ?').get('current');
+  return row ? { prize: row.prize, points: row.points, sponsor: row.sponsor } : {};
 }
 
-/**
- * Saves prize configuration.
- * @param {string} prize       — prize description
- * @param {number} points      — points needed to win
- * @param {string} sponsor     — who is sponsoring the prize
- */
 function setPrize(prize, points, sponsor) {
-  write('prize', { prize, points, sponsor, updatedAt: new Date().toISOString() });
+  const db = getDb();
+  db.prepare(`
+    INSERT OR REPLACE INTO prize (id, prize, points, sponsor)
+    VALUES (?, ?, ?, ?)
+  `).run('current', prize, points, sponsor);
 }
 
-// ─── Logs ─────────────────────────────────────────────────────────────────────
+// ─── Logs ──────────────────────────────────────────────────────────────────────
 
 function log(type, data) {
-  const list = read('logs');
-  list.push({ type, ...data, ts: new Date().toISOString() });
-  if (list.length > 1000) list.splice(0, list.length - 1000);
-  write('logs', list);
+  const db = getDb();
+  const message = JSON.stringify({ type, data });
+  const timestamp = new Date().toISOString();
+  db.prepare('INSERT INTO logs (message, timestamp) VALUES (?, ?)').run(message, timestamp);
 }
 
-// ─── Schedule Overrides ───────────────────────────────────────────────────────
+// ─── Schedule Overrides ────────────────────────────────────────────────────────
 
 function getScheduleOverrides() {
-  return read('scheduleOverrides');
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM schedule_overrides').all();
+  const overrides = {};
+  for (const row of rows) {
+    try {
+      overrides[row.date] = JSON.parse(row.override_data);
+    } catch (e) {
+      overrides[row.date] = [];
+    }
+  }
+  return overrides;
 }
 
 function getOverrideForDate(date) {
-  const overrides = getScheduleOverrides();
-  return overrides[date] || null;
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM schedule_overrides WHERE date = ?').get(date);
+  try {
+    return row ? JSON.parse(row.override_data) : null;
+  } catch (e) {
+    return null;
+  }
 }
 
 function saveScheduleOverride(date, classes) {
-  const overrides = getScheduleOverrides();
-  overrides[date] = classes;
-  write('scheduleOverrides', overrides);
+  const db = getDb();
+  db.prepare(`
+    INSERT OR REPLACE INTO schedule_overrides (date, override_data)
+    VALUES (?, ?)
+  `).run(date, JSON.stringify(classes));
 }
 
 function deleteScheduleOverride(date) {
-  const overrides = getScheduleOverrides();
-  delete overrides[date];
-  write('scheduleOverrides', overrides);
+  const db = getDb();
+  db.prepare('DELETE FROM schedule_overrides WHERE date = ?').run(date);
 }
 
-// ─── Dado (dice rolls) ─────────────────────────────────────────────────────────
+// ─── Dado (Dice Rolls) ─────────────────────────────────────────────────────────
 
-const getDado = () => read('dado');
+function getDado() {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM dado WHERE id = ?').get('current');
+  try {
+    return row ? JSON.parse(row.data) : {};
+  } catch (e) {
+    return {};
+  }
+}
 
 function saveDadoRoll(userId, number) {
-  const dado = getDado();
+  const db = getDb();
+  let dado = getDado();
   if (!dado[userId]) {
     dado[userId] = [];
   }
   dado[userId].push({
-    number: number,
+    number,
     timestamp: new Date().toISOString(),
   });
-  write('dado', dado);
+  db.prepare(`
+    INSERT OR REPLACE INTO dado (id, data)
+    VALUES (?, ?)
+  `).run('current', JSON.stringify(dado));
 }
 
 function checkDadoCooldown(userId, cooldownSeconds = 30) {
@@ -819,43 +779,26 @@ function getDadoCooldownRemaining(userId, cooldownSeconds = 30) {
   return Math.max(0, cooldownSeconds - elapsedSeconds);
 }
 
+// ─── Exports ──────────────────────────────────────────────────────────────────
+
 module.exports = {
-  // cache management
   initializeCache, flush,
-  // reminders
   getReminders, saveReminder, deleteReminder, getActiveReminders,
-  // pending reminders
   getPendingReminders, savePendingReminder, deletePendingReminder,
-  // homework
   getHomework, saveHomework, deleteHomework,
-  // pending homework
   getPending, savePending, deletePending,
-  // notes
   getNotes, saveNote, deleteNote,
-  // pending notes
   getPendingNotes, savePendingNote, deletePendingNote,
-  // resources
   getResources, saveResource, deleteResource,
-  // pending resources
   getPendingResources, savePendingResource, deletePendingResource,
-  // faq
   getFaqs, getActiveFaqs, saveFaq, saveFaqForReminder, deleteFaq, deleteFaqsByReminderId, matchFaq,
-  // stats
   getStats, incrementStat, getLeaderboard, addBonusPoints, transferPoints, attackUser,
-  // mute
   getMuted, muteUser, unmuteUser, isMuted, cleanExpiredMutes,
-  // questions
   getQuestions, saveQuestion, updateQuestion, markAnswered,
-  // daily questions
   getDailyQuestions, saveDailyQuestions,
-  // activity
   getActivity, updateLastSeen, setWarnedAt, getUserByActivityId,
-  // prize
   getPrize, setPrize,
-  // logs
   log,
-  // schedule overrides
   getScheduleOverrides, getOverrideForDate, saveScheduleOverride, deleteScheduleOverride,
-  // dado
   getDado, saveDadoRoll, checkDadoCooldown, getDadoCooldownRemaining,
 };
